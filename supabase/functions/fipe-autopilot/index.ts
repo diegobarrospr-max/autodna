@@ -66,12 +66,15 @@ const BRAND_ALIASES: Record<string, string[]> = {
   GWM: ['gwm', 'great wall'],
 };
 
-const FUEL_TO_CODE: Record<string, string> = {
-  flex: '1',
-  gasolina: '1',
-  diesel: '3',
-  hibrido: '1',
-  eletrico: '4',
+// FIPE fuel codes: 1 = Gasolina, 2 = Álcool, 3 = Diesel, 4 = Elétrico,
+// 5 = Flex, 6 = Híbrido. A nossa enum 'flex' pode aparecer como '1' OU '5'
+// dependendo do ano/modelo, então listamos como fallback.
+const FUEL_TO_CODES: Record<string, string[]> = {
+  flex: ['5', '1'],
+  gasolina: ['1', '2'],
+  diesel: ['3'],
+  hibrido: ['6', '5', '1'],
+  eletrico: ['4'],
 };
 
 function matchBrand(ourBrand: string, fipeBrands: FipeBrand[]): FipeBrand | null {
@@ -129,11 +132,7 @@ function pickBestModel(
 }
 
 function pickYear(ourYear: number, ourFuel: string, fipeYears: FipeYear[]): FipeYear | null {
-  // Estrito: só aceita ano + combustível EXATOS. Sem fallback pra outro ano,
-  // sem fallback pra outro combustível.
-  const fuelCode = FUEL_TO_CODE[ourFuel] ?? '1';
-  // Parallelum às vezes usa "5" como código de Flex em vez de "1" — aceita ambos.
-  const acceptableFuelCodes = fuelCode === '1' ? ['1', '5'] : [fuelCode];
+  const acceptableFuelCodes = FUEL_TO_CODES[ourFuel] ?? ['5', '1'];
   for (const fc of acceptableFuelCodes) {
     const expected = `${ourYear}-${fc}`;
     const exact = fipeYears.find((y) => y.codigo === expected);
