@@ -1,28 +1,16 @@
 // AutoDNA — fipe-autopilot Edge Function
 // Mapeia automaticamente os códigos FIPE (marca/modelo/ano) para cada
 // car_model do catálogo que ainda não tem esses campos preenchidos.
-// Estratégia:
-//   1. Lista marcas da FIPE via Parallelum
-//   2. Para cada marca distinta do nosso catálogo, faz match fuzzy
-//   3. Para cada modelo do catálogo, lista modelos FIPE da marca e
-//      escolhe o melhor match por sobreposição de palavras-chave
-//   4. Para cada modelo mapeado, lista anos FIPE e seleciona o ano+combustível
-//      que bate com o nosso (flex → "1", diesel → "3")
-//   5. Salva fipe_brand_code, fipe_model_code, fipe_year_code em car_models
-//
-// API:
-//   POST /functions/v1/fipe-autopilot
-//     body: { only_unmapped?: boolean }  // default true
-//
-// Retorna o status de mapeamento de cada modelo.
+// Usa a API v1 da Parallelum (paths em português, campos codigo/nome).
 
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 
-const PARALLELUM = 'https://parallelum.com.br/fipe/api/v2/carros';
+const PARALLELUM = 'https://parallelum.com.br/fipe/api/v1/carros';
 
-interface FipeBrand { code: string; name: string; }
-interface FipeModel { code: string; name: string; }
-interface FipeYear { code: string; name: string; }
+interface FipeBrand { codigo: string; nome: string; }
+interface FipeModelsResponse { modelos: FipeModel[]; anos: FipeYear[]; }
+interface FipeModel { codigo: number | string; nome: string; }
+interface FipeYear { codigo: string; nome: string; }
 
 interface OurModel {
   id: string;
@@ -64,7 +52,7 @@ function normalize(s: string): string {
 }
 
 const BRAND_ALIASES: Record<string, string[]> = {
-  Chevrolet: ['gm', 'gm chevrolet', 'chevrolet'],
+  Chevrolet: ['gm chevrolet', 'gm', 'chevrolet'],
   Volkswagen: ['vw', 'volkswagen'],
   Fiat: ['fiat'],
   Hyundai: ['hyundai'],
@@ -90,7 +78,7 @@ function matchBrand(ourBrand: string, fipeBrands: FipeBrand[]): FipeBrand | null
   const aliases = (BRAND_ALIASES[ourBrand] ?? [ourBrand]).map(normalize);
   let best: { brand: FipeBrand; score: number } | null = null;
   for (const fb of fipeBrands) {
-    const fbName = normalize(fb.name);
+    const fbName = normalize(fb.nome);
     for (const a of aliases) {
       if (fbName === a) return fb;
       if (fbName.includes(a) || a.includes(fbName)) {
@@ -121,7 +109,7 @@ function pickBestModel(
 ): { model: FipeModel; score: number } | null {
   let best: { model: FipeModel; score: number } | null = null;
   for (const fm of fipeModels) {
-    const score = scoreModelMatch(ourModel, ourVersion, fm.name);
+    const score = scoreModelMatch(ourModel, ourVersion, fm.nome);
     if (!best || score > best.score) best = { model: fm, score };
   }
   if (!best || best.score < 0.4) return null;
@@ -130,14 +118,14 @@ function pickBestModel(
 
 function pickYear(ourYear: number, ourFuel: string, fipeYears: FipeYear[]): FipeYear | null {
   const expectedCode = `${ourYear}-${FUEL_TO_CODE[ourFuel] ?? '1'}`;
-  const exact = fipeYears.find((y) => y.code === expectedCode);
+  const exact = fipeYears.find((y) => y.codigo === expectedCode);
   if (exact) return exact;
-  // Fallback: only match by year prefix
-  const sameYear = fipeYears.find((y) => y.code.startsWith(`${ourYear}-`));
+  const sameYear = fipeYears.find((y) => y.codigo.startsWith(`${ourYear}-`));
   if (sameYear) return sameYear;
-  // Fallback: closest year
   const sorted = [...fipeYears].sort(
-    (a, b) => Math.abs(Number(a.code.split('-')[0]) - ourYear) - Math.abs(Number(b.code.split('-')[0]) - ourYear),
+    (a, b) =>
+      Math.abs(Number(a.codigo.split('-')[0]) - ourYear) -
+      Math.abs(Number(b.codigo.split('-')[0]) - ourYear),
   );
   return sorted[0] ?? null;
 }
@@ -149,30 +137,20 @@ async function fetchJson<T>(url: string): Promise<T> {
 }
 
 Deno.serve(async (req) => {
-  if (req.method !== 'POST') {
-    return new Response('Method not allowed', { status: 405 });
-  }
+  if (req.method !== 'POST') return new Response('Method not allowed', { status: 405 });
 
   const supabaseUrl = Deno.env.get('SUPABASE_URL');
   const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
-  if (!supabaseUrl || !serviceKey) {
-    return new Response('Server misconfigured', { status: 500 });
-  }
-  const admin = createClient(supabaseUrl, serviceKey, {
-    auth: { persistSession: false },
-  });
+  if (!supabaseUrl || !serviceKey) return new Response('Server misconfigured', { status: 500 });
+  const admin = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
 
   let body: { only_unmapped?: boolean } = { only_unmapped: true };
-  try {
-    body = { only_unmapped: true, ...(await req.json()) };
-  } catch {}
+  try { body = { only_unmapped: true, ...(await req.json()) }; } catch {}
 
   let query = admin
     .from('car_models')
     .select('id, brand, model, version, year, fuel, fipe_brand_code, fipe_model_code, fipe_year_code');
-  if (body.only_unmapped) {
-    query = query.is('fipe_brand_code', null);
-  }
+  if (body.only_unmapped) query = query.is('fipe_brand_code', null);
   const { data: models, error: mErr } = await query;
   if (mErr) return new Response(`models error: ${mErr.message}`, { status: 500 });
   if (!models?.length) {
@@ -181,20 +159,15 @@ Deno.serve(async (req) => {
     });
   }
 
-  // 1. Load FIPE brands once
   let fipeBrands: FipeBrand[];
   try {
     fipeBrands = await fetchJson<FipeBrand[]>(`${PARALLELUM}/marcas`);
   } catch (err) {
-    return new Response(`brands fetch failed: ${(err as Error).message}`, {
-      status: 502,
-    });
+    return new Response(`brands fetch failed: ${(err as Error).message}`, { status: 502 });
   }
 
-  // 2. Cache models per brand to avoid refetching
   const modelsByBrand = new Map<string, FipeModel[]>();
   const yearsByModel = new Map<string, FipeYear[]>();
-
   const results: MappingResult[] = [];
 
   for (const m of models as OurModel[]) {
@@ -205,26 +178,28 @@ Deno.serve(async (req) => {
         continue;
       }
 
-      if (!modelsByBrand.has(fipeBrand.code)) {
-        const mods = await fetchJson<FipeModel[]>(`${PARALLELUM}/marcas/${fipeBrand.code}/modelos`);
-        modelsByBrand.set(fipeBrand.code, mods);
+      if (!modelsByBrand.has(fipeBrand.codigo)) {
+        const resp = await fetchJson<FipeModelsResponse>(
+          `${PARALLELUM}/marcas/${fipeBrand.codigo}/modelos`,
+        );
+        modelsByBrand.set(fipeBrand.codigo, resp.modelos ?? []);
       }
-      const fipeMods = modelsByBrand.get(fipeBrand.code)!;
+      const fipeMods = modelsByBrand.get(fipeBrand.codigo)!;
       const picked = pickBestModel(m.model, m.version, fipeMods);
       if (!picked) {
         results.push({
           ...modelMeta(m),
           status: 'no_model_match',
-          fipe_brand_code: fipeBrand.code,
-          fipe_brand_name: fipeBrand.name,
+          fipe_brand_code: fipeBrand.codigo,
+          fipe_brand_name: fipeBrand.nome,
         });
         continue;
       }
 
-      const cacheKey = `${fipeBrand.code}:${picked.model.code}`;
+      const cacheKey = `${fipeBrand.codigo}:${picked.model.codigo}`;
       if (!yearsByModel.has(cacheKey)) {
         const yrs = await fetchJson<FipeYear[]>(
-          `${PARALLELUM}/marcas/${fipeBrand.code}/modelos/${picked.model.code}/anos`,
+          `${PARALLELUM}/marcas/${fipeBrand.codigo}/modelos/${picked.model.codigo}/anos`,
         );
         yearsByModel.set(cacheKey, yrs);
       }
@@ -234,21 +209,22 @@ Deno.serve(async (req) => {
         results.push({
           ...modelMeta(m),
           status: 'no_year_match',
-          fipe_brand_code: fipeBrand.code,
-          fipe_brand_name: fipeBrand.name,
-          fipe_model_code: picked.model.code,
-          fipe_model_name: picked.model.name,
+          fipe_brand_code: fipeBrand.codigo,
+          fipe_brand_name: fipeBrand.nome,
+          fipe_model_code: String(picked.model.codigo),
+          fipe_model_name: picked.model.nome,
           match_score: Number(picked.score.toFixed(2)),
         });
         continue;
       }
 
+      const modelCodeStr = String(picked.model.codigo);
       const { error: upErr } = await admin
         .from('car_models')
         .update({
-          fipe_brand_code: fipeBrand.code,
-          fipe_model_code: picked.model.code,
-          fipe_year_code: yearMatch.code,
+          fipe_brand_code: fipeBrand.codigo,
+          fipe_model_code: modelCodeStr,
+          fipe_year_code: yearMatch.codigo,
         })
         .eq('id', m.id);
       if (upErr) throw upErr;
@@ -256,12 +232,12 @@ Deno.serve(async (req) => {
       results.push({
         ...modelMeta(m),
         status: 'mapped',
-        fipe_brand_code: fipeBrand.code,
-        fipe_brand_name: fipeBrand.name,
-        fipe_model_code: picked.model.code,
-        fipe_model_name: picked.model.name,
-        fipe_year_code: yearMatch.code,
-        fipe_year_name: yearMatch.name,
+        fipe_brand_code: fipeBrand.codigo,
+        fipe_brand_name: fipeBrand.nome,
+        fipe_model_code: modelCodeStr,
+        fipe_model_name: picked.model.nome,
+        fipe_year_code: yearMatch.codigo,
+        fipe_year_name: yearMatch.nome,
         match_score: Number(picked.score.toFixed(2)),
       });
     } catch (err) {

@@ -1,33 +1,22 @@
 // AutoDNA — sync-fipe-price Edge Function
-// Sincroniza o preço FIPE atual de um (ou todos os) modelo(s) do catálogo:
-// faz fetch na Parallelum FIPE API (wrapper público da tabela oficial),
-// atualiza car_models.price_fipe e cria uma linha em fipe_snapshots
-// (histórico para calcular depreciação real ao longo do tempo).
-//
-// API:
-//   POST /functions/v1/sync-fipe-price
-//     body: { model_id?: string }   // se ausente, sincroniza todos os
-//                                   //   modelos com códigos FIPE mapeados
-//
-// Pré-requisito: car_models.fipe_brand_code, fipe_model_code, fipe_year_code
-// preenchidos para os modelos que se quer sincronizar.
+// Sincroniza o preço FIPE atual de um (ou todos os) modelo(s) do catálogo.
+// Usa Parallelum FIPE API v1 (paths em português, campos Valor/Marca/Modelo).
 
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 
-const PARALLELUM_BASE = 'https://parallelum.com.br/fipe/api/v2/carros';
+const PARALLELUM = 'https://parallelum.com.br/fipe/api/v1/carros';
 const SOURCE_LABEL = 'parallelum';
 
 interface FipeResponse {
-  vehicleType: number;
-  value: string;          // "R$ 89.990,00"
-  brand: string;
-  model: string;
-  modelYear: number;
-  fuel: string;
-  codeFipe: string;
-  referenceMonth: string; // "maio/2026"
-  authentication: string;
-  fuelAcronym: string;
+  Valor: string;          // "R$ 89.990,00"
+  Marca: string;
+  Modelo: string;
+  AnoModelo: number;
+  Combustivel: string;
+  CodigoFipe: string;
+  MesReferencia: string;  // "maio de 2026"
+  TipoVeiculo: number;
+  SiglaCombustivel: string;
 }
 
 function parseBrl(s: string): number {
@@ -42,7 +31,7 @@ async function fetchFipePrice(
   modelCode: string,
   yearCode: string,
 ): Promise<FipeResponse> {
-  const url = `${PARALLELUM_BASE}/marcas/${brandCode}/modelos/${modelCode}/anos/${yearCode}`;
+  const url = `${PARALLELUM}/marcas/${brandCode}/modelos/${modelCode}/anos/${yearCode}`;
   const res = await fetch(url, { headers: { accept: 'application/json' } });
   if (!res.ok) {
     throw new Error(`Parallelum returned ${res.status} for ${url}`);
@@ -68,7 +57,7 @@ Deno.serve(async (req) => {
   try {
     body = await req.json();
   } catch {
-    // empty body is fine — sync all
+    // empty body is fine
   }
 
   let query = admin
@@ -125,9 +114,9 @@ Deno.serve(async (req) => {
         m.fipe_model_code,
         m.fipe_year_code,
       );
-      const price = parseBrl(fipe.value);
+      const price = parseBrl(fipe.Valor);
       if (price <= 0) {
-        throw new Error(`Could not parse price from ${fipe.value}`);
+        throw new Error(`Could not parse price from ${fipe.Valor}`);
       }
 
       const { error: snapErr } = await admin.from('fipe_snapshots').upsert({
@@ -135,7 +124,7 @@ Deno.serve(async (req) => {
         fipe_brand_code: m.fipe_brand_code,
         fipe_model_code: m.fipe_model_code,
         fipe_year_code: m.fipe_year_code,
-        fipe_reference_month: fipe.referenceMonth,
+        fipe_reference_month: fipe.MesReferencia,
         price,
         snapshot_date: new Date().toISOString().slice(0, 10),
         source: SOURCE_LABEL,
@@ -154,7 +143,7 @@ Deno.serve(async (req) => {
         model: m.model,
         status: 'ok',
         price,
-        reference_month: fipe.referenceMonth,
+        reference_month: fipe.MesReferencia,
       });
     } catch (err) {
       results.push({
