@@ -8,7 +8,13 @@ import {
   type QuizInput,
   type Recommendation,
 } from '@/utils/recommend';
-import type { BodyType, ConditionType, FuelType, Transmission } from '@/types/database';
+import { computeMonthlyTco } from '@/utils/tco';
+import type {
+  BodyType,
+  ConditionType,
+  FuelType,
+  Transmission,
+} from '@/types/database';
 
 interface ListingRow {
   id: string;
@@ -116,6 +122,84 @@ async function fetchListingsWithModels(): Promise<ListingWithModelAndCosts[]> {
   return out;
 }
 
+interface EdgeFunctionRec {
+  listing_id: string;
+  model_id: string;
+  brand: string;
+  model: string;
+  version: string;
+  year: number;
+  body_type: BodyType;
+  fuel: string;
+  transmission: string;
+  seats: number;
+  trunk_liters: number | null;
+  fuel_consumption_avg: number;
+  tags: string[];
+  condition: ConditionType;
+  manufacture_year: number;
+  mileage_km: number | null;
+  asking_price: number;
+  city: string | null;
+  state: string | null;
+  tco: {
+    installment: number;
+    fuel: number;
+    insurance: number;
+    maintenance: number;
+    ipva: number;
+    depreciation: number;
+    total: number;
+  };
+  score: number;
+  rank: number;
+  reason: string;
+}
+
+async function tryEdgeFunction(
+  quiz: QuizInput,
+): Promise<Recommendation[] | null> {
+  try {
+    const { data, error } = await supabase.functions.invoke<{
+      recommendations: EdgeFunctionRec[];
+    }>('recommend-cars', { body: { quiz } });
+    if (error || !data?.recommendations) return null;
+    return data.recommendations.map<Recommendation>((r) => ({
+      listing: {
+        listing_id: r.listing_id,
+        model_id: r.model_id,
+        brand: r.brand,
+        model: r.model,
+        version: r.version,
+        year: r.year,
+        body_type: r.body_type,
+        fuel: r.fuel,
+        transmission: r.transmission,
+        seats: r.seats,
+        trunk_liters: r.trunk_liters,
+        fuel_consumption_city: null,
+        fuel_consumption_road: null,
+        tags: r.tags,
+        condition: r.condition,
+        manufacture_year: r.manufacture_year,
+        mileage_km: r.mileage_km,
+        asking_price: r.asking_price,
+        city: r.city,
+        state: r.state,
+        insurance_yearly: r.tco.insurance * 12,
+        maintenance_yearly: r.tco.maintenance * 12,
+        ipva_yearly: r.tco.ipva * 12,
+        depreciation_yearly: r.tco.depreciation * 12,
+      },
+      score: r.score,
+      tco: r.tco,
+      reasons: r.reason ? [r.reason] : [],
+    }));
+  } catch {
+    return null;
+  }
+}
+
 export function useListings() {
   return useQuery({
     queryKey: ['listings'],
@@ -132,15 +216,40 @@ export function useGenerateRecommendations() {
     mutationFn: async (quiz: QuizInput): Promise<Recommendation[]> => {
       if (!userId) throw new Error('not signed in');
 
+      // 1) Try Claude-powered Edge Function first (preferred).
+      const fromEdge = await tryEdgeFunction(quiz);
+      if (fromEdge && fromEdge.length > 0) {
+        return fromEdge;
+      }
+
+      // 2) Fallback: rank locally (no AI).
       const listings = await fetchListingsWithModels();
       const recs = filterAndRankListings(listings, quiz, 3);
 
-      const generatedAt = new Date().toISOString();
+      // Recompute TCO so it stays consistent
+      const enriched = recs.map((r) => ({
+        ...r,
+        tco: computeMonthlyTco({
+          asking_price: r.listing.asking_price,
+          monthly_km: quiz.monthly_km,
+          fuel_consumption_avg_km_per_l:
+            ((r.listing.fuel_consumption_city ?? 0) * 0.6) +
+            ((r.listing.fuel_consumption_road ?? 0) * 0.4) ||
+            r.listing.fuel_consumption_city ||
+            r.listing.fuel_consumption_road ||
+            1,
+          insurance_yearly: r.listing.insurance_yearly,
+          maintenance_yearly: r.listing.maintenance_yearly,
+          ipva_yearly: r.listing.ipva_yearly,
+          depreciation_yearly: r.listing.depreciation_yearly,
+        }),
+      }));
 
+      const generatedAt = new Date().toISOString();
       await supabase.from('matches').delete().eq('user_id', userId);
 
-      if (recs.length > 0) {
-        const rows = recs.map((r, idx) => ({
+      if (enriched.length > 0) {
+        const rows = enriched.map((r, idx) => ({
           user_id: userId,
           car_id: r.listing.model_id,
           score: r.score,
@@ -152,7 +261,7 @@ export function useGenerateRecommendations() {
         if (error) throw error;
       }
 
-      return recs;
+      return enriched;
     },
     onSuccess: (recs) => {
       queryClient.setQueryData(['recommendations', userId], recs);
@@ -165,6 +274,7 @@ export function useRecommendations() {
 
   return useQuery<Recommendation[]>({
     queryKey: ['recommendations', userId],
+    queryFn: async () => [],
     enabled: false,
     initialData: [],
   });

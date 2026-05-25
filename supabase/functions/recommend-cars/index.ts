@@ -1,0 +1,391 @@
+// AutoDNA — recommend-cars Edge Function
+// Recebe respostas do quiz, filtra candidatos por regras, chama Claude
+// para escolher top 3 com explicação narrativa em PT-BR, persiste em
+// matches e devolve o ranking para o cliente.
+//
+// Deploy:
+//   supabase functions deploy recommend-cars --project-ref eaorpeaszqkahjlukncr
+// Secrets (pelo dashboard Supabase ou CLI):
+//   supabase secrets set ANTHROPIC_API_KEY=sk-ant-... --project-ref eaorpeaszqkahjlukncr
+
+import { createClient } from 'jsr:@supabase/supabase-js@2';
+
+const ANTHROPIC_MODEL = 'claude-sonnet-4-6';
+const ANTHROPIC_VERSION = '2023-06-01';
+const MAX_CANDIDATES_TO_CLAUDE = 12;
+const TOP_N = 3;
+
+const FUEL_PRICE = 6.0;
+const DOWN_PAYMENT = 0.2;
+const FINANCING_MONTHS = 60;
+const MONTHLY_INTEREST = 0.018;
+
+type ConditionType = 'new' | 'used';
+type BodyType = 'hatch' | 'sedan' | 'suv' | 'pickup' | 'minivan' | 'crossover';
+type CarConditionPreference = 'new' | 'used' | 'both';
+
+interface QuizInput {
+  monthly_income: number;
+  household_size: number;
+  monthly_km: number;
+  car_condition_preference: CarConditionPreference;
+  max_mileage_km: number | null;
+  priorities: string[];
+}
+
+interface Candidate {
+  listing_id: string;
+  model_id: string;
+  brand: string;
+  model: string;
+  version: string;
+  year: number;
+  body_type: BodyType;
+  fuel: string;
+  transmission: string;
+  seats: number;
+  trunk_liters: number | null;
+  fuel_consumption_avg: number;
+  tags: string[];
+  condition: ConditionType;
+  manufacture_year: number;
+  mileage_km: number | null;
+  asking_price: number;
+  city: string | null;
+  state: string | null;
+  tco: {
+    installment: number;
+    fuel: number;
+    insurance: number;
+    maintenance: number;
+    ipva: number;
+    depreciation: number;
+    total: number;
+  };
+}
+
+interface ClaudeRecommendation {
+  listing_id: string;
+  score: number;
+  reason: string;
+}
+
+// ---------- helpers ----------
+
+function monthlyInstallment(price: number) {
+  const financed = price * (1 - DOWN_PAYMENT);
+  const factor =
+    (MONTHLY_INTEREST * Math.pow(1 + MONTHLY_INTEREST, FINANCING_MONTHS)) /
+    (Math.pow(1 + MONTHLY_INTEREST, FINANCING_MONTHS) - 1);
+  return financed * factor;
+}
+
+function computeTco(
+  price: number,
+  monthly_km: number,
+  consumption: number,
+  insurance_yearly: number,
+  maintenance_yearly: number,
+  ipva_yearly: number,
+  depreciation_yearly: number,
+) {
+  const installment = monthlyInstallment(price);
+  const fuel = consumption > 0 ? (monthly_km / consumption) * FUEL_PRICE : 0;
+  const insurance = insurance_yearly / 12;
+  const maintenance = maintenance_yearly / 12;
+  const ipva = ipva_yearly / 12;
+  const depreciation = depreciation_yearly / 12;
+  return {
+    installment,
+    fuel,
+    insurance,
+    maintenance,
+    ipva,
+    depreciation,
+    total: installment + fuel + insurance + maintenance + ipva + depreciation,
+  };
+}
+
+const BODY_FOR_HOUSEHOLD: Record<number, BodyType[]> = {
+  1: ['hatch', 'sedan', 'crossover', 'suv', 'pickup'],
+  2: ['hatch', 'sedan', 'crossover', 'suv', 'pickup'],
+  3: ['hatch', 'sedan', 'crossover', 'suv', 'minivan'],
+  4: ['sedan', 'crossover', 'suv', 'minivan'],
+  5: ['suv', 'minivan'],
+};
+
+// ---------- main ----------
+
+Deno.serve(async (req) => {
+  if (req.method !== 'POST') {
+    return new Response('Method not allowed', { status: 405 });
+  }
+
+  const authHeader = req.headers.get('authorization');
+  if (!authHeader?.startsWith('Bearer ')) {
+    return new Response('Unauthorized', { status: 401 });
+  }
+  const jwt = authHeader.slice(7);
+
+  const supabaseUrl = Deno.env.get('SUPABASE_URL');
+  const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+  const anthropicKey = Deno.env.get('ANTHROPIC_API_KEY');
+  if (!supabaseUrl || !serviceKey || !anthropicKey) {
+    return new Response('Server misconfigured', { status: 500 });
+  }
+
+  const admin = createClient(supabaseUrl, serviceKey, {
+    auth: { persistSession: false },
+  });
+
+  const { data: userData, error: userErr } = await admin.auth.getUser(jwt);
+  if (userErr || !userData?.user) {
+    return new Response('Unauthorized', { status: 401 });
+  }
+  const userId = userData.user.id;
+
+  let body: { quiz?: QuizInput };
+  try {
+    body = await req.json();
+  } catch {
+    return new Response('Invalid JSON', { status: 400 });
+  }
+  const quiz = body.quiz;
+  if (!quiz || !quiz.monthly_income || !quiz.priorities) {
+    return new Response('Missing quiz answers', { status: 400 });
+  }
+
+  // ----- fetch catalog -----
+  const { data: listings, error: lErr } = await admin
+    .from('car_listings')
+    .select(
+      'id, model_id, condition, manufacture_year, mileage_km, asking_price, city, state',
+    )
+    .eq('active', true);
+  if (lErr) {
+    return new Response(`listings error: ${lErr.message}`, { status: 500 });
+  }
+  if (!listings?.length) {
+    return new Response(JSON.stringify({ recommendations: [] }), {
+      headers: { 'content-type': 'application/json' },
+    });
+  }
+
+  const modelIds = Array.from(new Set(listings.map((l: any) => l.model_id)));
+
+  const [{ data: models }, { data: costs }] = await Promise.all([
+    admin
+      .from('car_models')
+      .select(
+        'id, brand, model, version, year, body_type, fuel, transmission, seats, trunk_liters, fuel_consumption_city, fuel_consumption_road, tags',
+      )
+      .in('id', modelIds),
+    admin
+      .from('car_costs')
+      .select(
+        'car_id, insurance_yearly, maintenance_yearly, ipva_yearly, depreciation_yearly',
+      )
+      .in('car_id', modelIds),
+  ]);
+
+  const modelById = new Map<string, any>();
+  for (const m of models ?? []) modelById.set(m.id, m);
+  const costsById = new Map<string, any>();
+  for (const c of costs ?? []) costsById.set(c.car_id, c);
+
+  // ----- pre-filter to keep prompt small -----
+  const bodyAllow = BODY_FOR_HOUSEHOLD[Math.min(quiz.household_size, 5)] ?? BODY_FOR_HOUSEHOLD[5];
+  const candidates: Candidate[] = [];
+
+  for (const l of listings) {
+    if (quiz.car_condition_preference !== 'both' && l.condition !== quiz.car_condition_preference) continue;
+    if (l.condition === 'used' && quiz.max_mileage_km && (l.mileage_km ?? 0) > quiz.max_mileage_km) continue;
+    const m = modelById.get(l.model_id);
+    const c = costsById.get(l.model_id);
+    if (!m || !c) continue;
+    if (!bodyAllow.includes(m.body_type)) continue;
+    if (quiz.household_size > m.seats) continue;
+
+    const city = Number(m.fuel_consumption_city ?? 0);
+    const road = Number(m.fuel_consumption_road ?? 0);
+    const consumption = city && road ? city * 0.6 + road * 0.4 : Math.max(city, road, 1);
+
+    const tco = computeTco(
+      Number(l.asking_price),
+      quiz.monthly_km,
+      consumption,
+      Number(c.insurance_yearly),
+      Number(c.maintenance_yearly),
+      Number(c.ipva_yearly),
+      Number(c.depreciation_yearly),
+    );
+
+    if (tco.total > quiz.monthly_income * 0.28) continue;
+
+    candidates.push({
+      listing_id: l.id,
+      model_id: m.id,
+      brand: m.brand,
+      model: m.model,
+      version: m.version,
+      year: m.year,
+      body_type: m.body_type,
+      fuel: m.fuel,
+      transmission: m.transmission,
+      seats: m.seats,
+      trunk_liters: m.trunk_liters,
+      fuel_consumption_avg: Math.round(consumption * 10) / 10,
+      tags: m.tags ?? [],
+      condition: l.condition,
+      manufacture_year: l.manufacture_year,
+      mileage_km: l.mileage_km,
+      asking_price: Number(l.asking_price),
+      city: l.city,
+      state: l.state,
+      tco: {
+        installment: Math.round(tco.installment),
+        fuel: Math.round(tco.fuel),
+        insurance: Math.round(tco.insurance),
+        maintenance: Math.round(tco.maintenance),
+        ipva: Math.round(tco.ipva),
+        depreciation: Math.round(tco.depreciation),
+        total: Math.round(tco.total),
+      },
+    });
+  }
+
+  if (candidates.length === 0) {
+    return new Response(JSON.stringify({ recommendations: [] }), {
+      headers: { 'content-type': 'application/json' },
+    });
+  }
+
+  // Sort by lowest TCO and take top N candidates for Claude
+  candidates.sort((a, b) => a.tco.total - b.tco.total);
+  const finalists = candidates.slice(0, MAX_CANDIDATES_TO_CLAUDE);
+
+  // ----- call Claude -----
+  const systemPrompt = `Você é o AutoDNA, um consultor brasileiro especialista em carros. Sua missão é ajudar uma pessoa a escolher o carro certo para o estilo de vida e o bolso dela.
+
+Você recebe o perfil do usuário e uma lista de carros que já passaram pelos filtros básicos (cabem no orçamento, número de assentos suficiente, tipo de carroceria compatível). Sua tarefa é escolher os 3 melhores e explicar PORQUÊ, em português brasileiro casual e direto.
+
+Regras:
+- Considere prioridades declaradas, TCO mensal versus renda, eficiência de combustível para quem roda muito, espaço para famílias grandes, e adequação do tipo de carroceria.
+- Seja objetivo: 2-3 frases curtas por recomendação, falando como quem conversa.
+- NÃO invente carros que não estão na lista.
+- NÃO ofereça mais de 3 carros.
+- Atribua um score de 0 a 100 que reflete o quanto o carro combina com a pessoa.
+- Retorne APENAS JSON, sem markdown.
+
+Formato exato da resposta:
+{
+  "recommendations": [
+    {"listing_id": "uuid-do-listing", "score": 0-100, "reason": "explicação em PT-BR"}
+  ]
+}`;
+
+  const userPayload = {
+    perfil: {
+      renda_mensal_liquida: quiz.monthly_income,
+      pessoas_no_carro: quiz.household_size,
+      km_por_mes: quiz.monthly_km,
+      preferencia_condicao: quiz.car_condition_preference,
+      km_maximo_aceitavel: quiz.max_mileage_km,
+      prioridades: quiz.priorities,
+    },
+    candidatos: finalists.map((c) => ({
+      listing_id: c.listing_id,
+      carro: `${c.brand} ${c.model} ${c.version} ${c.year}`,
+      condicao: c.condition,
+      ano_fabricacao: c.manufacture_year,
+      km: c.mileage_km,
+      preco: c.asking_price,
+      carroceria: c.body_type,
+      combustivel: c.fuel,
+      cambio: c.transmission,
+      assentos: c.seats,
+      porta_malas_l: c.trunk_liters,
+      consumo_medio_km_por_l: c.fuel_consumption_avg,
+      tags: c.tags,
+      tco_mensal_total: c.tco.total,
+      tco_breakdown: c.tco,
+    })),
+  };
+
+  const claudeRes = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'x-api-key': anthropicKey,
+      'anthropic-version': ANTHROPIC_VERSION,
+    },
+    body: JSON.stringify({
+      model: ANTHROPIC_MODEL,
+      max_tokens: 1500,
+      system: [
+        {
+          type: 'text',
+          text: systemPrompt,
+          cache_control: { type: 'ephemeral' },
+        },
+      ],
+      messages: [
+        {
+          role: 'user',
+          content: JSON.stringify(userPayload),
+        },
+      ],
+    }),
+  });
+
+  if (!claudeRes.ok) {
+    const text = await claudeRes.text();
+    return new Response(`Claude error: ${text}`, { status: 502 });
+  }
+
+  const claudeJson = (await claudeRes.json()) as {
+    content: Array<{ type: string; text?: string }>;
+  };
+  const textBlock = claudeJson.content?.find((b) => b.type === 'text')?.text ?? '';
+  let parsed: { recommendations: ClaudeRecommendation[] };
+  try {
+    parsed = JSON.parse(textBlock);
+  } catch {
+    return new Response(`Could not parse Claude output: ${textBlock}`, {
+      status: 502,
+    });
+  }
+
+  const top = parsed.recommendations.slice(0, TOP_N);
+  const finalistsById = new Map(finalists.map((f) => [f.listing_id, f]));
+  const enriched = top
+    .map((r, idx) => {
+      const f = finalistsById.get(r.listing_id);
+      if (!f) return null;
+      return {
+        ...f,
+        score: Math.max(0, Math.min(100, Math.round(r.score))),
+        rank: idx + 1,
+        reason: r.reason,
+      };
+    })
+    .filter((x): x is NonNullable<typeof x> => x !== null);
+
+  // persist matches
+  await admin.from('matches').delete().eq('user_id', userId);
+  if (enriched.length > 0) {
+    await admin.from('matches').insert(
+      enriched.map((m) => ({
+        user_id: userId,
+        car_id: m.model_id,
+        score: m.score,
+        rank: m.rank,
+        reason: m.reason,
+      })),
+    );
+  }
+
+  return new Response(JSON.stringify({ recommendations: enriched }), {
+    headers: { 'content-type': 'application/json' },
+  });
+});
