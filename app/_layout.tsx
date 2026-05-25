@@ -1,7 +1,10 @@
-// MINIMAL VERSION FOR DEBUGGING — strip NativeWind, providers, auth.
-// If this renders "AutoDNA debug", we know the crash is in the full stack.
+// DEBUG STEP 1: re-add NativeWind global.css only
 
 console.warn('[_layout] module loaded');
+
+import '../global.css';
+
+console.warn('[_layout] nativewind css imported');
 
 import { Stack } from 'expo-router';
 
