@@ -15,6 +15,8 @@ export type BodyType =
   | 'pickup'
   | 'minivan'
   | 'crossover';
+export type ConditionType = 'new' | 'used';
+export type SellerType = 'dealer' | 'private';
 
 export interface Database {
   public: {
@@ -54,7 +56,7 @@ export interface Database {
           updated_at?: string;
         };
       };
-      cars: {
+      car_models: {
         Row: {
           id: string;
           brand: string;
@@ -77,14 +79,43 @@ export interface Database {
           updated_at: string;
         };
         Insert: Omit<
-          Database['public']['Tables']['cars']['Row'],
+          Database['public']['Tables']['car_models']['Row'],
           'id' | 'created_at' | 'updated_at'
         > & {
           id?: string;
           created_at?: string;
           updated_at?: string;
         };
-        Update: Partial<Database['public']['Tables']['cars']['Insert']>;
+        Update: Partial<Database['public']['Tables']['car_models']['Insert']>;
+      };
+      car_listings: {
+        Row: {
+          id: string;
+          model_id: string;
+          condition: ConditionType;
+          manufacture_year: number;
+          mileage_km: number | null;
+          asking_price: number;
+          city: string | null;
+          state: string | null;
+          source: string;
+          source_url: string | null;
+          seller_type: SellerType | null;
+          active: boolean;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: Omit<
+          Database['public']['Tables']['car_listings']['Row'],
+          'id' | 'created_at' | 'updated_at' | 'active' | 'source'
+        > & {
+          id?: string;
+          active?: boolean;
+          source?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database['public']['Tables']['car_listings']['Insert']>;
       };
       car_costs: {
         Row: {
@@ -124,6 +155,7 @@ export interface Database {
       fuel_type: FuelType;
       transmission_type: Transmission;
       body_type: BodyType;
+      condition_type: ConditionType;
     };
   };
 }
