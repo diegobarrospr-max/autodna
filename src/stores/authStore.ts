@@ -19,6 +19,27 @@ interface AuthState {
   signOut: () => Promise<void>;
 }
 
+const SESSION_TIMEOUT_MS = 8000;
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error(`${label} timed out after ${ms}ms`)),
+      ms,
+    );
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      },
+    );
+  });
+}
+
 export const useAuthStore = create<AuthState>((set) => ({
   status: 'idle',
   session: null,
@@ -26,12 +47,6 @@ export const useAuthStore = create<AuthState>((set) => ({
 
   initialize: async () => {
     set({ status: 'loading' });
-    const { data } = await supabase.auth.getSession();
-    set({
-      session: data.session,
-      user: data.session?.user ?? null,
-      status: data.session ? 'authenticated' : 'unauthenticated',
-    });
 
     supabase.auth.onAuthStateChange((_event, session) => {
       set({
@@ -40,6 +55,23 @@ export const useAuthStore = create<AuthState>((set) => ({
         status: session ? 'authenticated' : 'unauthenticated',
       });
     });
+
+    try {
+      const { data, error } = await withTimeout(
+        supabase.auth.getSession(),
+        SESSION_TIMEOUT_MS,
+        'auth.getSession',
+      );
+      if (error) throw error;
+      set({
+        session: data.session,
+        user: data.session?.user ?? null,
+        status: data.session ? 'authenticated' : 'unauthenticated',
+      });
+    } catch (err) {
+      console.warn('[auth] initialize failed, signing out:', err);
+      set({ session: null, user: null, status: 'unauthenticated' });
+    }
   },
 
   signInWithPassword: async (email, password) => {
