@@ -1,58 +1,13 @@
-import '../global.css';
+// MINIMAL VERSION FOR DEBUGGING — strip NativeWind, providers, auth.
+// If this renders "AutoDNA debug", we know the crash is in the full stack.
 
-import { useEffect } from 'react';
-import { Stack, useRouter, useSegments } from 'expo-router';
-import { StatusBar } from 'expo-status-bar';
-import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { QueryClientProvider } from '@tanstack/react-query';
+console.warn('[_layout] module loaded');
 
-import { queryClient } from '@/lib/queryClient';
-import { useAuthStore } from '@/stores/authStore';
+import { Stack } from 'expo-router';
 
-function AuthGate() {
-  const status = useAuthStore((s) => s.status);
-  const initialize = useAuthStore((s) => s.initialize);
-  const segments = useSegments();
-  const router = useRouter();
-
-  useEffect(() => {
-    console.log('[AuthGate] mounting, calling initialize()');
-    void initialize();
-  }, [initialize]);
-
-  useEffect(() => {
-    console.log('[AuthGate] status=', status, 'segments=', segments);
-    if (status === 'idle' || status === 'loading') return;
-
-    const inAuthGroup = segments[0] === '(auth)';
-    const inTabsGroup = segments[0] === '(tabs)';
-
-    if (status === 'unauthenticated' && !inAuthGroup) {
-      console.log('[AuthGate] redirect -> /(auth)/login');
-      router.replace('/(auth)/login');
-    } else if (status === 'authenticated' && !inTabsGroup) {
-      console.log('[AuthGate] redirect -> /(tabs)');
-      router.replace('/(tabs)');
-    }
-  }, [status, segments, router]);
-
-  return null;
-}
+console.warn('[_layout] expo-router imported');
 
 export default function RootLayout() {
-  return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
-      <SafeAreaProvider>
-        <QueryClientProvider client={queryClient}>
-          <AuthGate />
-          <Stack screenOptions={{ headerShown: false }}>
-            <Stack.Screen name="(auth)" />
-            <Stack.Screen name="(tabs)" />
-          </Stack>
-          <StatusBar style="auto" />
-        </QueryClientProvider>
-      </SafeAreaProvider>
-    </GestureHandlerRootView>
-  );
+  console.warn('[_layout] RootLayout rendering');
+  return <Stack screenOptions={{ headerShown: false }} />;
 }
