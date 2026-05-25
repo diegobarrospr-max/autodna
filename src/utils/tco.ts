@@ -83,10 +83,12 @@ export function computeMonthlyTco(input: ComputeTcoInput): TcoBreakdown {
   return { installment, fuel, insurance, maintenance, ipva, depreciation, total };
 }
 
+export const AFFORDABLE_RATIO = 0.35;
+
 export function isAffordable(
   tcoTotal: number,
   monthlyIncome: number,
-  ratio = 0.28,
+  ratio = AFFORDABLE_RATIO,
 ): boolean {
   return tcoTotal <= monthlyIncome * ratio;
 }

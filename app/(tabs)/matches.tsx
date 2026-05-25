@@ -74,10 +74,19 @@ function MatchCard({ rec, badge }: { rec: Recommendation; badge: string }) {
     <View className="mt-6 overflow-hidden rounded-2xl border border-gray-200 bg-white">
       <View className="flex-row items-center justify-between bg-brand-50 px-5 py-3">
         <Text className="text-lg">{badge}</Text>
-        <View className="rounded-full bg-brand-100 px-3 py-1">
-          <Text className="text-xs font-semibold text-brand-700">
-            Match {rec.score}/100
-          </Text>
+        <View className="flex-row items-center">
+          {rec.overBudget ? (
+            <View className="mr-2 rounded-full bg-amber-100 px-3 py-1">
+              <Text className="text-xs font-semibold text-amber-800">
+                Acima do orçamento
+              </Text>
+            </View>
+          ) : null}
+          <View className="rounded-full bg-brand-100 px-3 py-1">
+            <Text className="text-xs font-semibold text-brand-700">
+              Match {rec.score}/100
+            </Text>
+          </View>
         </View>
       </View>
 

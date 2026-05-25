@@ -1,13 +1,15 @@
 // Recomendação client-side (regra de negócio simples)
 // Filtra anúncios compatíveis com o perfil e ranqueia top N.
-// Quando o Edge Function com Claude API entrar, substitui aqui.
+// Sempre retorna alguma coisa: se nenhum carro caber no orçamento (TCO ≤ 35%
+// da renda), aceita os mais baratos disponíveis marcando como "stretching the
+// budget" — assim o usuário vê opções em vez de uma tela vazia.
 
 import type {
   BodyType,
   CarConditionPreference,
   Priority,
 } from '@/types/database';
-import { computeMonthlyTco, isAffordable, type TcoBreakdown } from './tco';
+import { AFFORDABLE_RATIO, computeMonthlyTco, type TcoBreakdown } from './tco';
 
 export interface ListingWithModelAndCosts {
   listing_id: string;
@@ -50,6 +52,7 @@ export interface Recommendation {
   score: number;
   tco: TcoBreakdown;
   reasons: string[];
+  overBudget?: boolean;
 }
 
 const PRIORITY_TAG_MAP: Record<Priority, string[]> = {
@@ -79,26 +82,44 @@ const BODY_TYPE_FOR_HOUSEHOLD: Record<number, BodyType[]> = {
 function averageConsumption(c: ListingWithModelAndCosts): number {
   const city = c.fuel_consumption_city ?? 0;
   const road = c.fuel_consumption_road ?? 0;
-  if (city > 0 && road > 0) return (city * 0.6 + road * 0.4);
+  if (city > 0 && road > 0) return city * 0.6 + road * 0.4;
   return Math.max(city, road, 1);
 }
 
-export function filterAndRankListings(
+interface ScoredListing {
+  listing: ListingWithModelAndCosts;
+  tco: TcoBreakdown;
+  affordable: boolean;
+  baseScore: number;
+  matchedTags: string[];
+  reasons: string[];
+}
+
+function scoreListings(
   listings: ListingWithModelAndCosts[],
   quiz: QuizInput,
-  topN = 3,
-): Recommendation[] {
+): ScoredListing[] {
   const bodyAllowList =
     BODY_TYPE_FOR_HOUSEHOLD[Math.min(quiz.household_size, 5)] ??
     BODY_TYPE_FOR_HOUSEHOLD[5];
+  const priorityTagSet = new Set(
+    quiz.priorities.flatMap((p) => PRIORITY_TAG_MAP[p] ?? []),
+  );
 
-  const eligible: Recommendation[] = [];
+  const result: ScoredListing[] = [];
 
   for (const l of listings) {
-    if (quiz.car_condition_preference !== 'both' && l.condition !== quiz.car_condition_preference) {
+    if (
+      quiz.car_condition_preference !== 'both' &&
+      l.condition !== quiz.car_condition_preference
+    ) {
       continue;
     }
-    if (l.condition === 'used' && quiz.max_mileage_km && (l.mileage_km ?? 0) > quiz.max_mileage_km) {
+    if (
+      l.condition === 'used' &&
+      quiz.max_mileage_km &&
+      (l.mileage_km ?? 0) > quiz.max_mileage_km
+    ) {
       continue;
     }
     if (!bodyAllowList.includes(l.body_type)) continue;
@@ -114,43 +135,87 @@ export function filterAndRankListings(
       depreciation_yearly: l.depreciation_yearly,
     });
 
-    if (!isAffordable(tco.total, quiz.monthly_income)) continue;
+    const affordable = tco.total <= quiz.monthly_income * AFFORDABLE_RATIO;
 
-    let score = 50;
+    let baseScore = 50;
     const reasons: string[] = [];
 
-    const budgetRatio = tco.total / (quiz.monthly_income * 0.28);
+    const budgetRatio = tco.total / (quiz.monthly_income * AFFORDABLE_RATIO);
     const budgetScore = Math.max(0, 25 * (1 - budgetRatio));
-    score += budgetScore;
-    if (budgetScore > 15) reasons.push('Cabe folgado no seu orçamento');
-    else if (budgetScore > 5) reasons.push('Dentro do seu orçamento');
+    baseScore += budgetScore;
+    if (affordable && budgetScore > 15)
+      reasons.push('Cabe folgado no seu orçamento');
+    else if (affordable && budgetScore > 5)
+      reasons.push('Dentro do seu orçamento');
 
-    const priorityTagSet = new Set(
-      quiz.priorities.flatMap((p) => PRIORITY_TAG_MAP[p] ?? []),
-    );
     const matchedTags = l.tags.filter((t) => priorityTagSet.has(t));
-    score += Math.min(25, matchedTags.length * 6);
+    baseScore += Math.min(25, matchedTags.length * 6);
     if (matchedTags.length >= 2) {
-      reasons.push(`Bate com suas prioridades (${matchedTags.slice(0, 3).join(', ')})`);
+      reasons.push(
+        `Bate com suas prioridades (${matchedTags.slice(0, 3).join(', ')})`,
+      );
     } else if (matchedTags.length === 1) {
       reasons.push(`Tem o estilo ${matchedTags[0]}`);
     }
 
     if (quiz.monthly_km >= 1500 && averageConsumption(l) >= 12) {
-      score += 8;
+      baseScore += 8;
       reasons.push('Bom consumo para quem roda bastante');
     }
 
-    if (quiz.household_size >= 4 && l.seats >= 5 && (l.trunk_liters ?? 0) >= 400) {
-      score += 6;
+    if (
+      quiz.household_size >= 4 &&
+      l.seats >= 5 &&
+      (l.trunk_liters ?? 0) >= 400
+    ) {
+      baseScore += 6;
       reasons.push('Espaço sobra para a família');
     }
 
-    eligible.push({ listing: l, score, tco, reasons });
+    if (!affordable) {
+      reasons.push('Está acima do recomendado para sua renda');
+    }
+
+    result.push({
+      listing: l,
+      tco,
+      affordable,
+      baseScore,
+      matchedTags,
+      reasons,
+    });
   }
 
-  return eligible
-    .sort((a, b) => b.score - a.score)
+  return result;
+}
+
+export function filterAndRankListings(
+  listings: ListingWithModelAndCosts[],
+  quiz: QuizInput,
+  topN = 3,
+): Recommendation[] {
+  const scored = scoreListings(listings, quiz);
+
+  if (scored.length === 0) return [];
+
+  const affordable = scored.filter((s) => s.affordable);
+  const pool = affordable.length > 0 ? affordable : scored;
+
+  return pool
+    .sort((a, b) => {
+      if (a.affordable !== b.affordable) return a.affordable ? -1 : 1;
+      if (a.affordable) return b.baseScore - a.baseScore;
+      return a.tco.total - b.tco.total;
+    })
     .slice(0, topN)
-    .map((r, idx) => ({ ...r, score: Math.min(100, Math.round(r.score)), reasons: r.reasons.length > 0 ? r.reasons : [idx === 0 ? 'Melhor compatibilidade geral' : 'Boa compatibilidade'] }));
+    .map((s, idx) => ({
+      listing: s.listing,
+      score: Math.min(100, Math.round(s.baseScore)),
+      tco: s.tco,
+      reasons:
+        s.reasons.length > 0
+          ? s.reasons
+          : [idx === 0 ? 'Melhor compatibilidade geral' : 'Boa compatibilidade'],
+      overBudget: !s.affordable,
+    }));
 }

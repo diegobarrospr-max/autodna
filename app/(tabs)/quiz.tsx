@@ -141,7 +141,7 @@ export default function QuizTab() {
       if (recs.length === 0) {
         Alert.alert(
           'Nenhum match encontrado',
-          'Não achamos carros que caibam nos seus filtros. Tenta relaxar o orçamento ou ampliar a preferência de condição.',
+          'Os filtros foram muito restritivos. Tenta trocar a preferência de condição para "Tanto faz" ou rever o número de pessoas no carro.',
         );
         return;
       }
