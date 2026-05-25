@@ -91,15 +91,27 @@ function matchBrand(ourBrand: string, fipeBrands: FipeBrand[]): FipeBrand | null
 }
 
 function scoreModelMatch(model: string, version: string, fipeName: string): number {
-  const ours = normalize(`${model} ${version}`).split(' ').filter(Boolean);
+  // Garantir que o nome principal do modelo bate. Sem isso, descartamos
+  // o candidato — evita "Onix" virar "Tracker", "T-Cross" virar "Nivus".
+  const modelTokens = normalize(model).split(' ').filter((t) => t.length >= 2);
+  const versionTokens = normalize(version).split(' ').filter((t) => t.length >= 2);
   const fipe = normalize(fipeName).split(' ').filter(Boolean);
-  if (ours.length === 0) return 0;
-  let matches = 0;
-  for (const t of ours) {
-    if (t.length < 2) continue;
-    if (fipe.some((f) => f === t || f.startsWith(t) || t.startsWith(f))) matches++;
+  if (modelTokens.length === 0) return 0;
+
+  const tokenMatchesAny = (t: string) =>
+    fipe.some((f) => f === t || f.startsWith(t) || t.startsWith(f));
+
+  // Hard requirement: TODA palavra do model name precisa aparecer no FIPE name.
+  for (const t of modelTokens) {
+    if (!tokenMatchesAny(t)) return 0;
   }
-  return matches / ours.length;
+
+  // Bonus por palavras de versão (Premier, LT, Turbo, Hybrid, ...).
+  let bonus = 0;
+  for (const t of versionTokens) {
+    if (tokenMatchesAny(t)) bonus += 1;
+  }
+  return 0.5 + Math.min(0.5, bonus * 0.15); // base 0.5 (model OK) + até 0.5 de versão
 }
 
 function pickBestModel(
@@ -112,22 +124,22 @@ function pickBestModel(
     const score = scoreModelMatch(ourModel, ourVersion, fm.nome);
     if (!best || score > best.score) best = { model: fm, score };
   }
-  if (!best || best.score < 0.4) return null;
+  if (!best || best.score < 0.55) return null;
   return best;
 }
 
 function pickYear(ourYear: number, ourFuel: string, fipeYears: FipeYear[]): FipeYear | null {
-  const expectedCode = `${ourYear}-${FUEL_TO_CODE[ourFuel] ?? '1'}`;
-  const exact = fipeYears.find((y) => y.codigo === expectedCode);
-  if (exact) return exact;
-  const sameYear = fipeYears.find((y) => y.codigo.startsWith(`${ourYear}-`));
-  if (sameYear) return sameYear;
-  const sorted = [...fipeYears].sort(
-    (a, b) =>
-      Math.abs(Number(a.codigo.split('-')[0]) - ourYear) -
-      Math.abs(Number(b.codigo.split('-')[0]) - ourYear),
-  );
-  return sorted[0] ?? null;
+  // Estrito: só aceita ano + combustível EXATOS. Sem fallback pra outro ano,
+  // sem fallback pra outro combustível.
+  const fuelCode = FUEL_TO_CODE[ourFuel] ?? '1';
+  // Parallelum às vezes usa "5" como código de Flex em vez de "1" — aceita ambos.
+  const acceptableFuelCodes = fuelCode === '1' ? ['1', '5'] : [fuelCode];
+  for (const fc of acceptableFuelCodes) {
+    const expected = `${ourYear}-${fc}`;
+    const exact = fipeYears.find((y) => y.codigo === expected);
+    if (exact) return exact;
+  }
+  return null;
 }
 
 async function fetchJson<T>(url: string): Promise<T> {
