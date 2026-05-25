@@ -172,26 +172,66 @@ function MatchCard({ rec, badge }: { rec: Recommendation; badge: string }) {
   );
 }
 
+interface TcoRow {
+  label: string;
+  hint?: string;
+  value: number;
+}
+
 function TcoMini({ breakdown }: { breakdown: TcoBreakdown }) {
-  const rows: Array<[string, number]> = [
-    ['Parcela financiamento', breakdown.installment],
-    ['Combustível', breakdown.fuel],
-    ['Seguro', breakdown.insurance],
-    ['Manutenção', breakdown.maintenance],
-    ['IPVA', breakdown.ipva],
-    ['Depreciação', breakdown.depreciation],
+  const rows: TcoRow[] = [
+    {
+      label: 'Parcela do financiamento',
+      hint: 'Sai do seu bolso todo mês',
+      value: breakdown.installment,
+    },
+    {
+      label: 'Combustível',
+      hint: 'Estimativa baseada em quanto você roda',
+      value: breakdown.fuel,
+    },
+    {
+      label: 'Seguro',
+      hint: 'Mensalizado (anual ÷ 12)',
+      value: breakdown.insurance,
+    },
+    {
+      label: 'Manutenção e revisões',
+      hint: 'Mensalizado (anual ÷ 12)',
+      value: breakdown.maintenance,
+    },
+    {
+      label: 'IPVA',
+      hint: 'Mensalizado (anual ÷ 12)',
+      value: breakdown.ipva,
+    },
+    {
+      label: 'Depreciação',
+      hint: 'Custo "invisível": quanto o carro perde de valor de revenda',
+      value: breakdown.depreciation,
+    },
   ];
   return (
     <View className="mt-4 border-t border-gray-100 pt-4">
       <Text className="text-xs font-semibold uppercase tracking-wider text-gray-500">
-        Breakdown do TCO
+        Quanto custa por mês (TCO)
       </Text>
-      {rows.map(([label, value]) => (
-        <View key={label} className="mt-2 flex-row justify-between">
-          <Text className="text-sm text-gray-600">{label}</Text>
-          <Text className="text-sm font-medium text-gray-900">
-            {formatBRL(value)}
-          </Text>
+      <Text className="mt-1 text-xs text-gray-400">
+        Todos os valores são mensais. Itens anuais (seguro, IPVA, depreciação)
+        são divididos por 12.
+      </Text>
+      {rows.map((row) => (
+        <View key={row.label} className="mt-3">
+          <View className="flex-row items-baseline justify-between">
+            <Text className="text-sm text-gray-700">{row.label}</Text>
+            <Text className="text-sm font-medium text-gray-900">
+              {formatBRL(row.value)}
+              <Text className="text-xs text-gray-400">/mês</Text>
+            </Text>
+          </View>
+          {row.hint ? (
+            <Text className="mt-0.5 text-xs text-gray-400">{row.hint}</Text>
+          ) : null}
         </View>
       ))}
     </View>
