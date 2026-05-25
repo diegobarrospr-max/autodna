@@ -1,0 +1,29 @@
+{
+  "expo": {
+    "name": "AutoDNA",
+    "slug": "autodna",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "scheme": "autodna",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.autodna.app"
+    },
+    "android": {
+      "package": "com.autodna.app",
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png",
+      "bundler": "metro"
+    }
+  }
+}
