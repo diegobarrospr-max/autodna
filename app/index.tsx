@@ -1,21 +1,12 @@
-// MINIMAL VERSION FOR DEBUGGING
-
 console.warn('[index] module loaded');
 
-import { Text, View } from 'react-native';
-
-console.warn('[index] react-native imported');
+import { ActivityIndicator, View } from 'react-native';
 
 export default function Index() {
   console.warn('[index] Index rendering');
   return (
-    <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: 'white' }}>
-      <Text style={{ fontSize: 24, fontWeight: 'bold', color: '#1f54f5' }}>
-        AutoDNA debug
-      </Text>
-      <Text style={{ marginTop: 8, color: '#666' }}>
-        If you see this, basic rendering works.
-      </Text>
+    <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: 'white' }}>
+      <ActivityIndicator size="large" />
     </View>
   );
 }
