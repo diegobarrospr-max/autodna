@@ -16,13 +16,12 @@ const MAX_CANDIDATES_TO_CLAUDE = 12;
 const TOP_N = 3;
 
 const FUEL_PRICE = 6.0;
-const DOWN_PAYMENT = 0.2;
-const FINANCING_MONTHS = 60;
-const MONTHLY_INTEREST = 0.018;
+const AFFORDABLE_RATIO = 0.35;
 
 type ConditionType = 'new' | 'used';
 type BodyType = 'hatch' | 'sedan' | 'suv' | 'pickup' | 'minivan' | 'crossover';
 type CarConditionPreference = 'new' | 'used' | 'both';
+type PaymentMode = 'cash' | 'financed';
 
 interface QuizInput {
   monthly_income: number;
@@ -31,6 +30,10 @@ interface QuizInput {
   car_condition_preference: CarConditionPreference;
   max_mileage_km: number | null;
   priorities: string[];
+  payment_mode: PaymentMode;
+  down_payment_pct: number;
+  financing_months: number;
+  monthly_interest: number;
 }
 
 interface Candidate {
@@ -72,25 +75,28 @@ interface ClaudeRecommendation {
 
 // ---------- helpers ----------
 
-function monthlyInstallment(price: number) {
-  const financed = price * (1 - DOWN_PAYMENT);
-  const factor =
-    (MONTHLY_INTEREST * Math.pow(1 + MONTHLY_INTEREST, FINANCING_MONTHS)) /
-    (Math.pow(1 + MONTHLY_INTEREST, FINANCING_MONTHS) - 1);
+function monthlyInstallment(price: number, quiz: QuizInput) {
+  if (quiz.payment_mode === 'cash') return 0;
+  const financed = price * (1 - quiz.down_payment_pct / 100);
+  if (financed <= 0) return 0;
+  const r = quiz.monthly_interest;
+  const n = quiz.financing_months;
+  if (r <= 0) return financed / n;
+  const factor = (r * Math.pow(1 + r, n)) / (Math.pow(1 + r, n) - 1);
   return financed * factor;
 }
 
 function computeTco(
   price: number,
-  monthly_km: number,
+  quiz: QuizInput,
   consumption: number,
   insurance_yearly: number,
   maintenance_yearly: number,
   ipva_yearly: number,
   depreciation_yearly: number,
 ) {
-  const installment = monthlyInstallment(price);
-  const fuel = consumption > 0 ? (monthly_km / consumption) * FUEL_PRICE : 0;
+  const installment = monthlyInstallment(price, quiz);
+  const fuel = consumption > 0 ? (quiz.monthly_km / consumption) * FUEL_PRICE : 0;
   const insurance = insurance_yearly / 12;
   const maintenance = maintenance_yearly / 12;
   const ipva = ipva_yearly / 12;
@@ -212,7 +218,7 @@ Deno.serve(async (req) => {
 
     const tco = computeTco(
       Number(l.asking_price),
-      quiz.monthly_km,
+      quiz,
       consumption,
       Number(c.insurance_yearly),
       Number(c.maintenance_yearly),
@@ -220,7 +226,7 @@ Deno.serve(async (req) => {
       Number(c.depreciation_yearly),
     );
 
-    if (tco.total > quiz.monthly_income * 0.28) continue;
+    if (tco.total > quiz.monthly_income * AFFORDABLE_RATIO) continue;
 
     candidates.push({
       listing_id: l.id,

@@ -4,6 +4,8 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 
 import { Button } from '@/components/Button';
+import { useFinancingRate } from '@/hooks/useFinancingRate';
+import { useProfile } from '@/hooks/useProfile';
 import { useRecommendations } from '@/hooks/useRecommendations';
 import { formatBRL, type TcoBreakdown } from '@/utils/tco';
 import type { Recommendation } from '@/utils/recommend';
@@ -13,6 +15,8 @@ const RANK_BADGE = ['🥇', '🥈', '🥉'];
 export default function MatchesTab() {
   const router = useRouter();
   const { data: recs } = useRecommendations();
+  const { data: profile } = useProfile();
+  const { data: rate } = useFinancingRate();
 
   if (!recs || recs.length === 0) {
     return (
@@ -37,6 +41,8 @@ export default function MatchesTab() {
     );
   }
 
+  const isFinanced = profile?.payment_mode === 'financed';
+
   return (
     <SafeAreaView className="flex-1 bg-white" edges={['top']}>
       <ScrollView contentContainerStyle={{ padding: 24, paddingBottom: 48 }}>
@@ -49,6 +55,38 @@ export default function MatchesTab() {
         <Text className="mt-2 text-base leading-6 text-gray-500">
           Carros que combinam com seu perfil e cabem no seu bolso.
         </Text>
+
+        <View className="mt-4 rounded-xl bg-gray-50 p-4">
+          <Text className="text-xs font-semibold uppercase tracking-wider text-gray-500">
+            Como calculamos
+          </Text>
+          {isFinanced && rate ? (
+            <Text className="mt-2 text-sm text-gray-700">
+              Financiamento de {profile?.financing_months}× com entrada de{' '}
+              {Math.round(Number(profile?.down_payment_pct ?? 0))}% e taxa de{' '}
+              <Text className="font-semibold">
+                {rate.annual_rate.toFixed(2)}% a.a.
+              </Text>{' '}
+              ({(rate.monthly_rate * 100).toFixed(2)}% a.m.).
+            </Text>
+          ) : isFinanced ? (
+            <Text className="mt-2 text-sm text-gray-700">
+              Financiamento de {profile?.financing_months}× com entrada de{' '}
+              {Math.round(Number(profile?.down_payment_pct ?? 0))}%. Taxa do
+              mercado em consulta…
+            </Text>
+          ) : (
+            <Text className="mt-2 text-sm text-gray-700">
+              Pagamento à vista — sem parcelas de financiamento no TCO.
+            </Text>
+          )}
+          {rate ? (
+            <Text className="mt-2 text-xs text-gray-500">
+              Taxa real consultada em {rate.source}, atualizada em{' '}
+              {rate.as_of}.
+            </Text>
+          ) : null}
+        </View>
 
         {recs.map((rec, idx) => (
           <MatchCard key={rec.listing.listing_id} rec={rec} badge={RANK_BADGE[idx] ?? '⭐️'} />

@@ -16,9 +16,11 @@ import { Pill } from '@/components/Pill';
 import { RadioGroup } from '@/components/RadioGroup';
 import { useProfile, useUpdateProfile } from '@/hooks/useProfile';
 import { useGenerateRecommendations } from '@/hooks/useRecommendations';
+import { useFinancingRate } from '@/hooks/useFinancingRate';
 import type {
   CarConditionPreference,
   ParkingType,
+  PaymentMode,
   Priority,
 } from '@/types/database';
 
@@ -66,11 +68,33 @@ const PRIORITY_OPTIONS: { value: Priority; label: string }[] = [
   { value: 'status', label: 'Status' },
 ];
 
+const PAYMENT_OPTIONS: { value: PaymentMode; label: string; description: string }[] = [
+  { value: 'financed', label: 'Vou financiar', description: 'Entrada + parcelas mensais' },
+  { value: 'cash', label: 'Vou pagar à vista', description: 'Sem parcelas' },
+];
+
+const DOWN_PAYMENT_OPTIONS = [
+  { value: 0, label: 'Sem entrada' },
+  { value: 10, label: '10% de entrada' },
+  { value: 20, label: '20% de entrada' },
+  { value: 30, label: '30% de entrada' },
+  { value: 50, label: '50% de entrada' },
+];
+
+const FINANCING_MONTHS_OPTIONS = [
+  { value: 24, label: '24 meses' },
+  { value: 36, label: '36 meses' },
+  { value: 48, label: '48 meses' },
+  { value: 60, label: '60 meses' },
+  { value: 72, label: '72 meses' },
+];
+
 export default function QuizTab() {
   const router = useRouter();
   const { data: profile } = useProfile();
   const updateProfile = useUpdateProfile();
   const generateRecs = useGenerateRecommendations();
+  const rateQuery = useFinancingRate();
 
   const [incomeText, setIncomeText] = useState('');
   const [household, setHousehold] = useState<number | null>(null);
@@ -79,6 +103,9 @@ export default function QuizTab() {
   const [condition, setCondition] = useState<CarConditionPreference | null>(null);
   const [maxMileage, setMaxMileage] = useState<number | null>(null);
   const [priorities, setPriorities] = useState<Priority[]>([]);
+  const [paymentMode, setPaymentMode] = useState<PaymentMode | null>(null);
+  const [downPayment, setDownPayment] = useState<number | null>(null);
+  const [months, setMonths] = useState<number | null>(null);
 
   useEffect(() => {
     if (!profile) return;
@@ -89,6 +116,9 @@ export default function QuizTab() {
     if (profile.car_condition_preference) setCondition(profile.car_condition_preference);
     if (profile.max_mileage_km) setMaxMileage(profile.max_mileage_km);
     if (profile.priorities?.length) setPriorities(profile.priorities);
+    if (profile.payment_mode) setPaymentMode(profile.payment_mode);
+    if (profile.down_payment_pct != null) setDownPayment(Number(profile.down_payment_pct));
+    if (profile.financing_months) setMonths(profile.financing_months);
   }, [profile]);
 
   const income = useMemo(() => {
@@ -108,12 +138,22 @@ export default function QuizTab() {
     parking !== null &&
     monthlyKm !== null &&
     condition !== null &&
+    paymentMode !== null &&
     priorities.length > 0 &&
-    (condition !== 'used' || maxMileage !== null);
+    (condition !== 'used' || maxMileage !== null) &&
+    (paymentMode !== 'financed' || (downPayment !== null && months !== null));
 
   const onSubmit = async () => {
     if (!canSubmit) {
       Alert.alert('Falta pouco', 'Preenche todas as perguntas antes de continuar.');
+      return;
+    }
+
+    if (paymentMode === 'financed' && !rateQuery.data) {
+      Alert.alert(
+        'Buscando a taxa do mercado',
+        'Estamos consultando a taxa atual do Banco Central. Tenta de novo em alguns segundos.',
+      );
       return;
     }
 
@@ -126,6 +166,9 @@ export default function QuizTab() {
         car_condition_preference: condition,
         max_mileage_km: condition === 'used' ? maxMileage : null,
         priorities,
+        payment_mode: paymentMode,
+        down_payment_pct: paymentMode === 'financed' ? downPayment : null,
+        financing_months: paymentMode === 'financed' ? months : null,
         quiz_completed_at: new Date().toISOString(),
       });
 
@@ -136,6 +179,11 @@ export default function QuizTab() {
         car_condition_preference: condition ?? 'both',
         max_mileage_km: condition === 'used' ? maxMileage : null,
         priorities,
+        payment_mode: paymentMode ?? 'financed',
+        down_payment_pct: paymentMode === 'financed' ? (downPayment ?? 0) : 0,
+        financing_months: paymentMode === 'financed' ? (months ?? 60) : 60,
+        monthly_interest:
+          paymentMode === 'financed' ? rateQuery.data!.monthly_rate : 0,
       });
 
       if (recs.length === 0) {
@@ -171,8 +219,8 @@ export default function QuizTab() {
             Conta pra gente
           </Text>
           <Text className="mt-2 text-base leading-6 text-gray-500">
-            7 perguntas rápidas e a gente acha o carro que faz sentido pro seu
-            bolso e seu estilo.
+            Algumas perguntas rápidas e a gente acha o carro que faz sentido pro
+            seu bolso e seu estilo.
           </Text>
 
           <Question number={1} title="Qual sua renda mensal líquida?" hint="Soma tudo que entra na sua conta por mês.">
@@ -212,7 +260,58 @@ export default function QuizTab() {
             />
           </Question>
 
-          <Question number={5} title="Procura um carro novo ou usado?">
+          <Question number={5} title="Como você pretende pagar?">
+            <RadioGroup
+              value={paymentMode}
+              onChange={setPaymentMode}
+              options={PAYMENT_OPTIONS}
+            />
+          </Question>
+
+          {paymentMode === 'financed' && (
+            <>
+              <Question number={6} title="Quanto você consegue dar de entrada?">
+                <RadioGroup
+                  value={downPayment}
+                  onChange={setDownPayment}
+                  options={DOWN_PAYMENT_OPTIONS}
+                />
+              </Question>
+
+              <Question
+                number={7}
+                title="Em quantos meses quer pagar?"
+                hint={
+                  rateQuery.data
+                    ? `Taxa atual de mercado: ${rateQuery.data.annual_rate.toFixed(2)}% a.a. (≈ ${(rateQuery.data.monthly_rate * 100).toFixed(2)}% a.m.). Fonte: ${rateQuery.data.source}, ${rateQuery.data.as_of}.`
+                    : rateQuery.isFetching
+                      ? 'Buscando a taxa atual no Banco Central…'
+                      : 'A taxa será buscada no Banco Central no momento da simulação.'
+                }
+              >
+                <RadioGroup
+                  value={months}
+                  onChange={setMonths}
+                  options={FINANCING_MONTHS_OPTIONS}
+                />
+              </Question>
+            </>
+          )}
+
+          {paymentMode === 'financed' ? null : paymentMode === 'cash' ? (
+            <View className="mt-4 rounded-2xl bg-gray-50 p-4">
+              <Text className="text-sm text-gray-600">
+                Pagando à vista, a parcela some do cálculo e o TCO mensal cai
+                bastante. Você ainda paga seguro, manutenção, IPVA, combustível
+                e depreciação.
+              </Text>
+            </View>
+          ) : null}
+
+          <Question
+            number={paymentMode === 'financed' ? 8 : 6}
+            title="Procura um carro novo ou usado?"
+          >
             <RadioGroup
               value={condition}
               onChange={setCondition}
@@ -222,7 +321,7 @@ export default function QuizTab() {
 
           {condition === 'used' && (
             <Question
-              number={6}
+              number={paymentMode === 'financed' ? 9 : 7}
               title="Qual a quilometragem máxima aceitável?"
               hint="Quanto menor, mais novo o usado — e mais caro também."
             >
@@ -235,7 +334,15 @@ export default function QuizTab() {
           )}
 
           <Question
-            number={condition === 'used' ? 7 : 6}
+            number={
+              paymentMode === 'financed'
+                ? condition === 'used'
+                  ? 10
+                  : 9
+                : condition === 'used'
+                  ? 8
+                  : 7
+            }
             title="O que mais importa pra você?"
             hint="Escolhe pelo menos uma. Pode marcar várias."
           >

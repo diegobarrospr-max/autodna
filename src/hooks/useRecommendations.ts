@@ -8,7 +8,6 @@ import {
   type QuizInput,
   type Recommendation,
 } from '@/utils/recommend';
-import { computeMonthlyTco } from '@/utils/tco';
 import type {
   BodyType,
   ConditionType,
@@ -222,34 +221,16 @@ export function useGenerateRecommendations() {
         return fromEdge;
       }
 
-      // 2) Fallback: rank locally (no AI).
+      // 2) Fallback: rank locally (no AI). The ranker already builds TCO
+      // using the financing terms supplied in the quiz.
       const listings = await fetchListingsWithModels();
       const recs = filterAndRankListings(listings, quiz, 3);
-
-      // Recompute TCO so it stays consistent
-      const enriched = recs.map((r) => ({
-        ...r,
-        tco: computeMonthlyTco({
-          asking_price: r.listing.asking_price,
-          monthly_km: quiz.monthly_km,
-          fuel_consumption_avg_km_per_l:
-            ((r.listing.fuel_consumption_city ?? 0) * 0.6) +
-            ((r.listing.fuel_consumption_road ?? 0) * 0.4) ||
-            r.listing.fuel_consumption_city ||
-            r.listing.fuel_consumption_road ||
-            1,
-          insurance_yearly: r.listing.insurance_yearly,
-          maintenance_yearly: r.listing.maintenance_yearly,
-          ipva_yearly: r.listing.ipva_yearly,
-          depreciation_yearly: r.listing.depreciation_yearly,
-        }),
-      }));
 
       const generatedAt = new Date().toISOString();
       await supabase.from('matches').delete().eq('user_id', userId);
 
-      if (enriched.length > 0) {
-        const rows = enriched.map((r, idx) => ({
+      if (recs.length > 0) {
+        const rows = recs.map((r, idx) => ({
           user_id: userId,
           car_id: r.listing.model_id,
           score: r.score,
@@ -261,7 +242,7 @@ export function useGenerateRecommendations() {
         if (error) throw error;
       }
 
-      return enriched;
+      return recs;
     },
     onSuccess: (recs) => {
       queryClient.setQueryData(['recommendations', userId], recs);

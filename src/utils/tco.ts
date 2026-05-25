@@ -1,30 +1,37 @@
 // Custo Total de Propriedade (TCO) mensal
 // Componentes: parcela financiamento + combustível + seguro/12 + manutenção/12
 // + IPVA/12 + depreciação/12
+//
+// Decisões explícitas:
+// - Não há valores padrão de financiamento inventados. O caller passa
+//   payment_mode, down_payment_pct, financing_months e monthly_interest.
+// - A taxa de juros mensal deve ser obtida da Edge Function get-financing-rate
+//   (série SGS 20712 do Bacen) e nunca chutada no código.
 
 const DEFAULT_FUEL_PRICE_PER_L = 6.0;
-const DEFAULT_DOWN_PAYMENT_RATIO = 0.2;
-const DEFAULT_FINANCING_MONTHS = 60;
-const DEFAULT_MONTHLY_INTEREST = 0.018;
+export const AFFORDABLE_RATIO = 0.35;
 
-interface FinancingInput {
-  asking_price: number;
-  down_payment_ratio?: number;
-  months?: number;
-  monthly_interest?: number;
+export type PaymentMode = 'cash' | 'financed';
+
+export interface FinancingTerms {
+  payment_mode: PaymentMode;
+  down_payment_pct: number; // 0..100, % do preço dado de entrada
+  financing_months: number; // prazo em meses (12..84)
+  monthly_interest: number; // taxa mensal em decimal (ex: 0.0185 para 1.85% a.m.)
 }
 
-export function monthlyFinancingInstallment({
-  asking_price,
-  down_payment_ratio = DEFAULT_DOWN_PAYMENT_RATIO,
-  months = DEFAULT_FINANCING_MONTHS,
-  monthly_interest = DEFAULT_MONTHLY_INTEREST,
-}: FinancingInput): number {
-  const financed = asking_price * (1 - down_payment_ratio);
-  if (monthly_interest <= 0) return financed / months;
+interface InstallmentInput extends FinancingTerms {
+  asking_price: number;
+}
+
+export function monthlyFinancingInstallment(input: InstallmentInput): number {
+  if (input.payment_mode === 'cash') return 0;
+  const financed = input.asking_price * (1 - input.down_payment_pct / 100);
+  if (financed <= 0) return 0;
+  if (input.monthly_interest <= 0) return financed / input.financing_months;
   const factor =
-    (monthly_interest * Math.pow(1 + monthly_interest, months)) /
-    (Math.pow(1 + monthly_interest, months) - 1);
+    (input.monthly_interest * Math.pow(1 + input.monthly_interest, input.financing_months)) /
+    (Math.pow(1 + input.monthly_interest, input.financing_months) - 1);
   return financed * factor;
 }
 
@@ -53,7 +60,7 @@ export interface TcoBreakdown {
   total: number;
 }
 
-export interface ComputeTcoInput {
+export interface ComputeTcoInput extends FinancingTerms {
   asking_price: number;
   monthly_km: number;
   fuel_consumption_avg_km_per_l: number;
@@ -61,9 +68,6 @@ export interface ComputeTcoInput {
   maintenance_yearly: number;
   ipva_yearly: number;
   depreciation_yearly: number;
-  down_payment_ratio?: number;
-  months?: number;
-  monthly_interest?: number;
   fuel_price_per_l?: number;
 }
 
@@ -82,8 +86,6 @@ export function computeMonthlyTco(input: ComputeTcoInput): TcoBreakdown {
 
   return { installment, fuel, insurance, maintenance, ipva, depreciation, total };
 }
-
-export const AFFORDABLE_RATIO = 0.35;
 
 export function isAffordable(
   tcoTotal: number,

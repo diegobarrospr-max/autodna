@@ -1,15 +1,19 @@
 // Recomendação client-side (regra de negócio simples)
 // Filtra anúncios compatíveis com o perfil e ranqueia top N.
 // Sempre retorna alguma coisa: se nenhum carro caber no orçamento (TCO ≤ 35%
-// da renda), aceita os mais baratos disponíveis marcando como "stretching the
-// budget" — assim o usuário vê opções em vez de uma tela vazia.
+// da renda), aceita os mais baratos disponíveis marcando como over-budget.
 
 import type {
   BodyType,
   CarConditionPreference,
   Priority,
 } from '@/types/database';
-import { AFFORDABLE_RATIO, computeMonthlyTco, type TcoBreakdown } from './tco';
+import {
+  AFFORDABLE_RATIO,
+  computeMonthlyTco,
+  type FinancingTerms,
+  type TcoBreakdown,
+} from './tco';
 
 export interface ListingWithModelAndCosts {
   listing_id: string;
@@ -38,7 +42,7 @@ export interface ListingWithModelAndCosts {
   depreciation_yearly: number;
 }
 
-export interface QuizInput {
+export interface QuizInput extends FinancingTerms {
   monthly_income: number;
   household_size: number;
   monthly_km: number;
@@ -133,6 +137,10 @@ function scoreListings(
       maintenance_yearly: l.maintenance_yearly,
       ipva_yearly: l.ipva_yearly,
       depreciation_yearly: l.depreciation_yearly,
+      payment_mode: quiz.payment_mode,
+      down_payment_pct: quiz.down_payment_pct,
+      financing_months: quiz.financing_months,
+      monthly_interest: quiz.monthly_interest,
     });
 
     const affordable = tco.total <= quiz.monthly_income * AFFORDABLE_RATIO;
