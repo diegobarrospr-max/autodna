@@ -17,17 +17,22 @@ function AuthGate() {
   const router = useRouter();
 
   useEffect(() => {
+    console.log('[AuthGate] mounting, calling initialize()');
     void initialize();
   }, [initialize]);
 
   useEffect(() => {
+    console.log('[AuthGate] status=', status, 'segments=', segments);
     if (status === 'idle' || status === 'loading') return;
 
     const inAuthGroup = segments[0] === '(auth)';
+    const inTabsGroup = segments[0] === '(tabs)';
 
     if (status === 'unauthenticated' && !inAuthGroup) {
+      console.log('[AuthGate] redirect -> /(auth)/login');
       router.replace('/(auth)/login');
-    } else if (status === 'authenticated' && inAuthGroup) {
+    } else if (status === 'authenticated' && !inTabsGroup) {
+      console.log('[AuthGate] redirect -> /(tabs)');
       router.replace('/(tabs)');
     }
   }, [status, segments, router]);
