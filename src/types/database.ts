@@ -17,6 +17,19 @@ export type BodyType =
   | 'crossover';
 export type ConditionType = 'new' | 'used';
 export type SellerType = 'dealer' | 'private';
+export type CarConditionPreference = 'new' | 'used' | 'both';
+export type ParkingType =
+  | 'garagem_coberta'
+  | 'garagem_aberta'
+  | 'rua'
+  | 'condominio';
+export type Priority =
+  | 'economia'
+  | 'conforto'
+  | 'espaco'
+  | 'robustez'
+  | 'seguranca'
+  | 'status';
 
 export interface Database {
   public: {
@@ -29,7 +42,12 @@ export interface Database {
           city: string | null;
           state: string | null;
           household_size: number | null;
-          parking_type: string | null;
+          parking_type: ParkingType | null;
+          monthly_km: number | null;
+          car_condition_preference: CarConditionPreference | null;
+          max_mileage_km: number | null;
+          priorities: Priority[];
+          quiz_completed_at: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -40,21 +58,16 @@ export interface Database {
           city?: string | null;
           state?: string | null;
           household_size?: number | null;
-          parking_type?: string | null;
+          parking_type?: ParkingType | null;
+          monthly_km?: number | null;
+          car_condition_preference?: CarConditionPreference | null;
+          max_mileage_km?: number | null;
+          priorities?: Priority[];
+          quiz_completed_at?: string | null;
           created_at?: string;
           updated_at?: string;
         };
-        Update: {
-          id?: string;
-          full_name?: string | null;
-          monthly_income?: number | null;
-          city?: string | null;
-          state?: string | null;
-          household_size?: number | null;
-          parking_type?: string | null;
-          created_at?: string;
-          updated_at?: string;
-        };
+        Update: Partial<Database['public']['Tables']['profiles']['Insert']>;
       };
       car_models: {
         Row: {
@@ -156,6 +169,7 @@ export interface Database {
       transmission_type: Transmission;
       body_type: BodyType;
       condition_type: ConditionType;
+      car_condition_preference: CarConditionPreference;
     };
   };
 }

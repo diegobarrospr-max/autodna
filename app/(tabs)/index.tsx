@@ -4,13 +4,19 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 
 import { useAuthStore } from '@/stores/authStore';
+import { useProfile } from '@/hooks/useProfile';
+import { useRecommendations } from '@/hooks/useRecommendations';
 
 export default function HomeTab() {
   const router = useRouter();
   const user = useAuthStore((s) => s.user);
+  const { data: profile } = useProfile();
+  const { data: recs } = useRecommendations();
+
   const firstName =
-    (user?.user_metadata?.full_name as string | undefined)?.split(' ')[0] ??
-    'amigo';
+    (profile?.full_name ?? (user?.user_metadata?.full_name as string | undefined))
+      ?.split(' ')[0] ?? 'amigo';
+  const hasMatches = !!recs && recs.length > 0;
 
   return (
     <SafeAreaView className="flex-1 bg-white">
@@ -29,22 +35,29 @@ export default function HomeTab() {
         <View className="mt-8 rounded-2xl bg-brand-50 p-5">
           <View className="flex-row items-center">
             <View className="h-10 w-10 items-center justify-center rounded-full bg-brand-100">
-              <Ionicons name="sparkles" size={20} color="#1f54f5" />
+              <Ionicons
+                name={hasMatches ? 'car-sport' : 'sparkles'}
+                size={20}
+                color="#1f54f5"
+              />
             </View>
             <Text className="ml-3 flex-1 text-base font-semibold text-brand-900">
-              Encontre seu carro ideal
+              {hasMatches ? 'Você já tem matches' : 'Encontre seu carro ideal'}
             </Text>
           </View>
           <Text className="mt-3 text-sm leading-5 text-brand-800">
-            Responda 6 perguntas sobre seu perfil, orçamento e estilo de vida.
-            Levamos em conta combustível, manutenção, seguro e depreciação.
+            {hasMatches
+              ? `Você tem ${recs.length} carro${recs.length > 1 ? 's' : ''} que combinam com seu perfil. Veja os detalhes e o custo mensal de cada um.`
+              : 'Responda 7 perguntas sobre seu perfil, orçamento e estilo de vida. Levamos em conta combustível, manutenção, seguro e depreciação.'}
           </Text>
           <Pressable
-            onPress={() => router.push('/(tabs)/quiz')}
+            onPress={() =>
+              router.push(hasMatches ? '/(tabs)/matches' : '/(tabs)/quiz')
+            }
             className="mt-5 rounded-xl bg-brand-600 py-3 active:bg-brand-700"
           >
             <Text className="text-center text-base font-semibold text-white">
-              Começar o quiz
+              {hasMatches ? 'Ver meus matches' : 'Começar o quiz'}
             </Text>
           </Pressable>
         </View>
