@@ -4,7 +4,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function TabsLayout() {
   const insets = useSafeAreaInsets();
-  const bottomPad = Math.max(insets.bottom, 8);
+  // iOS home indicator é ~34px. Mesmo se o inset chegue zero (Safari sem
+  // viewport-fit ou Android), reservamos margem mínima decente.
+  const bottomPad = Math.max(insets.bottom, 24);
 
   return (
     <Tabs
@@ -12,12 +14,19 @@ export default function TabsLayout() {
         headerShown: false,
         tabBarActiveTintColor: '#1f54f5',
         tabBarInactiveTintColor: '#9ca3af',
-        tabBarLabelStyle: { fontSize: 11, fontWeight: '500', marginBottom: 4 },
         tabBarStyle: {
+          height: 64 + bottomPad,
           paddingTop: 8,
           paddingBottom: bottomPad,
-          height: 56 + bottomPad,
           borderTopColor: '#e5e7eb',
+        },
+        tabBarItemStyle: {
+          paddingVertical: 4,
+        },
+        tabBarLabelStyle: {
+          fontSize: 11,
+          fontWeight: '500',
+          marginTop: 2,
         },
       }}
     >
