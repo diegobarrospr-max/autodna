@@ -1,10 +1,24 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": null,
-  "buildCommand": "npx expo export --platform web --output-dir dist",
+  "buildCommand": "npx expo export --platform web --output-dir dist && node scripts/inject-pwa.js && cp -r public/. dist/",
   "installCommand": "npm install --legacy-peer-deps",
   "outputDirectory": "dist",
   "rewrites": [
-    { "source": "/(.*)", "destination": "/index.html" }
+    { "source": "/((?!_expo|icons|assets|manifest\\.webmanifest|sw\\.js|favicon).*)", "destination": "/index.html" }
+  ],
+  "headers": [
+    {
+      "source": "/sw.js",
+      "headers": [
+        { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }
+      ]
+    },
+    {
+      "source": "/manifest.webmanifest",
+      "headers": [
+        { "key": "Content-Type", "value": "application/manifest+json" }
+      ]
+    }
   ]
 }
