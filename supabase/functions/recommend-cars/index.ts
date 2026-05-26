@@ -22,6 +22,7 @@ type ConditionType = 'new' | 'used';
 type BodyType = 'hatch' | 'sedan' | 'suv' | 'pickup' | 'minivan' | 'crossover';
 type CarConditionPreference = 'new' | 'used' | 'both';
 type PaymentMode = 'cash' | 'financed';
+type TransmissionPreference = 'manual' | 'automatic' | 'any';
 
 interface QuizInput {
   monthly_income: number;
@@ -34,6 +35,8 @@ interface QuizInput {
   down_payment_pct: number;
   financing_months: number;
   monthly_interest: number;
+  max_budget: number | null;
+  transmission_preference: TransmissionPreference;
 }
 
 interface Candidate {
@@ -211,6 +214,14 @@ Deno.serve(async (req) => {
     if (!m || !c) continue;
     if (!bodyAllow.includes(m.body_type)) continue;
     if (quiz.household_size > m.seats) continue;
+    if (quiz.max_budget && Number(l.asking_price) > quiz.max_budget) continue;
+    if (quiz.transmission_preference === 'manual' && m.transmission !== 'manual') continue;
+    if (
+      quiz.transmission_preference === 'automatic' &&
+      m.transmission === 'manual'
+    ) {
+      continue;
+    }
 
     const city = Number(m.fuel_consumption_city ?? 0);
     const road = Number(m.fuel_consumption_road ?? 0);

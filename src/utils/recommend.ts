@@ -7,6 +7,7 @@ import type {
   BodyType,
   CarConditionPreference,
   Priority,
+  TransmissionPreference,
 } from '@/types/database';
 import {
   AFFORDABLE_RATIO,
@@ -49,6 +50,8 @@ export interface QuizInput extends FinancingTerms {
   car_condition_preference: CarConditionPreference;
   max_mileage_km: number | null;
   priorities: Priority[];
+  max_budget: number | null;
+  transmission_preference: TransmissionPreference;
 }
 
 export interface Recommendation {
@@ -128,6 +131,15 @@ function scoreListings(
     }
     if (!bodyAllowList.includes(l.body_type)) continue;
     if (quiz.household_size > l.seats) continue;
+    if (quiz.max_budget && l.asking_price > quiz.max_budget) continue;
+    if (quiz.transmission_preference === 'manual' && l.transmission !== 'manual') continue;
+    if (
+      quiz.transmission_preference === 'automatic' &&
+      l.transmission === 'manual'
+    ) {
+      // automatic accepts automatico, cvt and automatizado
+      continue;
+    }
 
     const tco = computeMonthlyTco({
       asking_price: l.asking_price,

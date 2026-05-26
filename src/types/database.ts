@@ -19,6 +19,7 @@ export type ConditionType = 'new' | 'used';
 export type SellerType = 'dealer' | 'private';
 export type CarConditionPreference = 'new' | 'used' | 'both';
 export type PaymentMode = 'cash' | 'financed';
+export type TransmissionPreference = 'manual' | 'automatic' | 'any';
 export type ParkingType =
   | 'garagem_coberta'
   | 'garagem_aberta'
@@ -51,6 +52,8 @@ export interface Database {
           payment_mode: PaymentMode | null;
           down_payment_pct: number | null;
           financing_months: number | null;
+          max_budget: number | null;
+          transmission_preference: TransmissionPreference | null;
           quiz_completed_at: string | null;
           created_at: string;
           updated_at: string;
@@ -70,6 +73,8 @@ export interface Database {
           payment_mode?: PaymentMode | null;
           down_payment_pct?: number | null;
           financing_months?: number | null;
+          max_budget?: number | null;
+          transmission_preference?: TransmissionPreference | null;
           quiz_completed_at?: string | null;
           created_at?: string;
           updated_at?: string;
@@ -178,6 +183,7 @@ export interface Database {
       condition_type: ConditionType;
       car_condition_preference: CarConditionPreference;
       payment_mode: PaymentMode;
+      transmission_preference: TransmissionPreference;
     };
   };
 }

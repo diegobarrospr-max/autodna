@@ -22,12 +22,19 @@ import type {
   ParkingType,
   PaymentMode,
   Priority,
+  TransmissionPreference,
 } from '@/types/database';
 
 const CONDITION_OPTIONS: { value: CarConditionPreference; label: string; description: string }[] = [
   { value: 'new', label: 'Novo', description: 'Zero km, vindo do catálogo' },
   { value: 'used', label: 'Usado', description: 'Já rodou um pouco, preço menor' },
   { value: 'both', label: 'Tanto faz', description: 'Mostrar as duas opções' },
+];
+
+const TRANSMISSION_OPTIONS: { value: TransmissionPreference; label: string; description?: string }[] = [
+  { value: 'automatic', label: 'Automático', description: 'Inclui automatizado e CVT' },
+  { value: 'manual', label: 'Manual', description: 'Câmbio com embreagem' },
+  { value: 'any', label: 'Tanto faz' },
 ];
 
 const HOUSEHOLD_OPTIONS = [
@@ -97,10 +104,12 @@ export default function QuizTab() {
   const rateQuery = useFinancingRate();
 
   const [incomeText, setIncomeText] = useState('');
+  const [budgetText, setBudgetText] = useState('');
   const [household, setHousehold] = useState<number | null>(null);
   const [parking, setParking] = useState<ParkingType | null>(null);
   const [monthlyKm, setMonthlyKm] = useState<number | null>(null);
   const [condition, setCondition] = useState<CarConditionPreference | null>(null);
+  const [transmission, setTransmission] = useState<TransmissionPreference | null>(null);
   const [maxMileage, setMaxMileage] = useState<number | null>(null);
   const [priorities, setPriorities] = useState<Priority[]>([]);
   const [paymentMode, setPaymentMode] = useState<PaymentMode | null>(null);
@@ -110,10 +119,12 @@ export default function QuizTab() {
   useEffect(() => {
     if (!profile) return;
     if (profile.monthly_income) setIncomeText(String(Math.round(profile.monthly_income)));
+    if (profile.max_budget) setBudgetText(String(Math.round(profile.max_budget)));
     if (profile.household_size) setHousehold(profile.household_size);
     if (profile.parking_type) setParking(profile.parking_type);
     if (profile.monthly_km) setMonthlyKm(profile.monthly_km);
     if (profile.car_condition_preference) setCondition(profile.car_condition_preference);
+    if (profile.transmission_preference) setTransmission(profile.transmission_preference);
     if (profile.max_mileage_km) setMaxMileage(profile.max_mileage_km);
     if (profile.priorities?.length) setPriorities(profile.priorities);
     if (profile.payment_mode) setPaymentMode(profile.payment_mode);
@@ -125,6 +136,11 @@ export default function QuizTab() {
     const digits = incomeText.replace(/\D/g, '');
     return digits ? Number(digits) : 0;
   }, [incomeText]);
+
+  const budget = useMemo(() => {
+    const digits = budgetText.replace(/\D/g, '');
+    return digits ? Number(digits) : 0;
+  }, [budgetText]);
 
   const togglePriority = (p: Priority) => {
     setPriorities((prev) =>
@@ -138,6 +154,7 @@ export default function QuizTab() {
     parking !== null &&
     monthlyKm !== null &&
     condition !== null &&
+    transmission !== null &&
     paymentMode !== null &&
     priorities.length > 0 &&
     (condition !== 'used' || maxMileage !== null) &&
@@ -160,10 +177,12 @@ export default function QuizTab() {
     try {
       await updateProfile.mutateAsync({
         monthly_income: income,
+        max_budget: budget > 0 ? budget : null,
         household_size: household,
         parking_type: parking,
         monthly_km: monthlyKm,
         car_condition_preference: condition,
+        transmission_preference: transmission,
         max_mileage_km: condition === 'used' ? maxMileage : null,
         priorities,
         payment_mode: paymentMode,
@@ -174,9 +193,11 @@ export default function QuizTab() {
 
       const recs = await generateRecs.mutateAsync({
         monthly_income: income,
+        max_budget: budget > 0 ? budget : null,
         household_size: household ?? 1,
         monthly_km: monthlyKm ?? 0,
         car_condition_preference: condition ?? 'both',
+        transmission_preference: transmission ?? 'any',
         max_mileage_km: condition === 'used' ? maxMileage : null,
         priorities,
         payment_mode: paymentMode ?? 'financed',
@@ -189,7 +210,7 @@ export default function QuizTab() {
       if (recs.length === 0) {
         Alert.alert(
           'Nenhum match encontrado',
-          'Os filtros foram muito restritivos. Tenta trocar a preferência de condição para "Tanto faz" ou rever o número de pessoas no carro.',
+          'Os filtros foram muito restritivos. Tenta aumentar o teto de orçamento, trocar a preferência de câmbio ou ampliar a condição (novo/usado).',
         );
         return;
       }
@@ -201,6 +222,9 @@ export default function QuizTab() {
   };
 
   const submitting = updateProfile.isPending || generateRecs.isPending;
+
+  let n = 0;
+  const next = () => ++n;
 
   return (
     <SafeAreaView className="flex-1 bg-white" edges={['top']}>
@@ -223,82 +247,57 @@ export default function QuizTab() {
             seu bolso e seu estilo.
           </Text>
 
-          <Question number={1} title="Qual sua renda mensal líquida?" hint="Soma tudo que entra na sua conta por mês.">
-            <View className="flex-row items-center rounded-xl border border-gray-200 bg-gray-50 px-4">
-              <Text className="text-base text-gray-500">R$</Text>
-              <TextInput
-                className="ml-2 flex-1 py-3 text-base text-gray-900"
-                placeholder="5000"
-                keyboardType="number-pad"
-                value={incomeText}
-                onChangeText={setIncomeText}
-              />
-            </View>
+          <Question number={next()} title="Qual sua renda mensal líquida?" hint="Soma tudo que entra na sua conta por mês.">
+            <MoneyInput value={incomeText} onChangeText={setIncomeText} placeholder="5000" />
           </Question>
 
-          <Question number={2} title="Quantas pessoas vão usar o carro?">
-            <RadioGroup
-              value={household}
-              onChange={setHousehold}
-              options={HOUSEHOLD_OPTIONS}
-            />
+          <Question
+            number={next()}
+            title="Qual o valor máximo que aceita pagar pelo carro?"
+            hint="Opcional. Se ficar em branco, mostramos tudo dentro do seu TCO."
+          >
+            <MoneyInput value={budgetText} onChangeText={setBudgetText} placeholder="Sem limite" />
           </Question>
 
-          <Question number={3} title="Onde você vai guardar?">
-            <RadioGroup
-              value={parking}
-              onChange={setParking}
-              options={PARKING_OPTIONS}
-            />
+          <Question number={next()} title="Quantas pessoas vão usar o carro?">
+            <RadioGroup value={household} onChange={setHousehold} options={HOUSEHOLD_OPTIONS} />
           </Question>
 
-          <Question number={4} title="Quanto você dirige por mês?">
-            <RadioGroup
-              value={monthlyKm}
-              onChange={setMonthlyKm}
-              options={MONTHLY_KM_OPTIONS}
-            />
+          <Question number={next()} title="Onde você vai guardar?">
+            <RadioGroup value={parking} onChange={setParking} options={PARKING_OPTIONS} />
           </Question>
 
-          <Question number={5} title="Como você pretende pagar?">
-            <RadioGroup
-              value={paymentMode}
-              onChange={setPaymentMode}
-              options={PAYMENT_OPTIONS}
-            />
+          <Question number={next()} title="Quanto você dirige por mês?">
+            <RadioGroup value={monthlyKm} onChange={setMonthlyKm} options={MONTHLY_KM_OPTIONS} />
+          </Question>
+
+          <Question number={next()} title="Como você pretende pagar?">
+            <RadioGroup value={paymentMode} onChange={setPaymentMode} options={PAYMENT_OPTIONS} />
           </Question>
 
           {paymentMode === 'financed' && (
             <>
-              <Question number={6} title="Quanto você consegue dar de entrada?">
-                <RadioGroup
-                  value={downPayment}
-                  onChange={setDownPayment}
-                  options={DOWN_PAYMENT_OPTIONS}
-                />
+              <Question number={next()} title="Quanto consegue dar de entrada?">
+                <RadioGroup value={downPayment} onChange={setDownPayment} options={DOWN_PAYMENT_OPTIONS} />
               </Question>
 
               <Question
-                number={7}
+                number={next()}
                 title="Em quantos meses quer pagar?"
                 hint={
                   rateQuery.data
                     ? `Taxa atual de mercado: ${rateQuery.data.annual_rate.toFixed(2)}% a.a. (≈ ${(rateQuery.data.monthly_rate * 100).toFixed(2)}% a.m.). Fonte: ${rateQuery.data.source}, ${rateQuery.data.as_of}.`
                     : rateQuery.isFetching
                       ? 'Buscando a taxa atual no Banco Central…'
-                      : 'A taxa será buscada no Banco Central no momento da simulação.'
+                      : 'A taxa será buscada no Banco Central na simulação.'
                 }
               >
-                <RadioGroup
-                  value={months}
-                  onChange={setMonths}
-                  options={FINANCING_MONTHS_OPTIONS}
-                />
+                <RadioGroup value={months} onChange={setMonths} options={FINANCING_MONTHS_OPTIONS} />
               </Question>
             </>
           )}
 
-          {paymentMode === 'financed' ? null : paymentMode === 'cash' ? (
+          {paymentMode === 'cash' && (
             <View className="mt-4 rounded-2xl bg-gray-50 p-4">
               <Text className="text-sm text-gray-600">
                 Pagando à vista, a parcela some do cálculo e o TCO mensal cai
@@ -306,43 +305,28 @@ export default function QuizTab() {
                 e depreciação.
               </Text>
             </View>
-          ) : null}
+          )}
 
-          <Question
-            number={paymentMode === 'financed' ? 8 : 6}
-            title="Procura um carro novo ou usado?"
-          >
-            <RadioGroup
-              value={condition}
-              onChange={setCondition}
-              options={CONDITION_OPTIONS}
-            />
+          <Question number={next()} title="Procura um carro novo ou usado?">
+            <RadioGroup value={condition} onChange={setCondition} options={CONDITION_OPTIONS} />
+          </Question>
+
+          <Question number={next()} title="Câmbio: automático ou manual?">
+            <RadioGroup value={transmission} onChange={setTransmission} options={TRANSMISSION_OPTIONS} />
           </Question>
 
           {condition === 'used' && (
             <Question
-              number={paymentMode === 'financed' ? 9 : 7}
+              number={next()}
               title="Qual a quilometragem máxima aceitável?"
               hint="Quanto menor, mais novo o usado — e mais caro também."
             >
-              <RadioGroup
-                value={maxMileage}
-                onChange={setMaxMileage}
-                options={MAX_MILEAGE_OPTIONS}
-              />
+              <RadioGroup value={maxMileage} onChange={setMaxMileage} options={MAX_MILEAGE_OPTIONS} />
             </Question>
           )}
 
           <Question
-            number={
-              paymentMode === 'financed'
-                ? condition === 'used'
-                  ? 10
-                  : 9
-                : condition === 'used'
-                  ? 8
-                  : 7
-            }
+            number={next()}
             title="O que mais importa pra você?"
             hint="Escolhe pelo menos uma. Pode marcar várias."
           >
@@ -369,6 +353,29 @@ export default function QuizTab() {
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
+  );
+}
+
+function MoneyInput({
+  value,
+  onChangeText,
+  placeholder,
+}: {
+  value: string;
+  onChangeText: (s: string) => void;
+  placeholder: string;
+}) {
+  return (
+    <View className="flex-row items-center rounded-xl border border-gray-200 bg-gray-50 px-4">
+      <Text className="text-base text-gray-500">R$</Text>
+      <TextInput
+        className="ml-2 flex-1 py-3 text-base text-gray-900"
+        placeholder={placeholder}
+        keyboardType="number-pad"
+        value={value}
+        onChangeText={onChangeText}
+      />
+    </View>
   );
 }
 

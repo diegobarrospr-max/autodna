@@ -1,4 +1,4 @@
-import { ScrollView, Text, View } from 'react-native';
+import { Linking, Pressable, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -167,9 +167,68 @@ function MatchCard({ rec, badge }: { rec: Recommendation; badge: string }) {
         </View>
 
         <TcoMini breakdown={rec.tco} />
+
+        <SearchOnline
+          brand={l.brand}
+          model={l.model}
+          year={l.year}
+          condition={l.condition}
+        />
       </View>
     </View>
   );
+}
+
+function SearchOnline({
+  brand,
+  model,
+  year,
+  condition,
+}: {
+  brand: string;
+  model: string;
+  year: number;
+  condition: 'new' | 'used';
+}) {
+  const open = (url: string) => Linking.openURL(url).catch(() => undefined);
+  const q = encodeURIComponent(`${brand} ${model}`);
+  const webmotors = `https://www.webmotors.com.br/carros/estoque/${slug(brand)}/${slug(model)}?anoDe=${year}&anoAte=${year}`;
+  const olx = `https://www.olx.com.br/autos-e-pecas/carros-vans-e-utilitarios/${condition === 'used' ? 'usados' : 'novos'}/estado-sp?q=${q}&rs=${year}&re=${year}`;
+  const ml = `https://lista.mercadolivre.com.br/${slug(brand)}-${slug(model)}-${year}`;
+
+  return (
+    <View className="mt-5 border-t border-gray-100 pt-4">
+      <Text className="text-xs font-semibold uppercase tracking-wider text-gray-500">
+        Ver anúncios deste modelo
+      </Text>
+      <View className="mt-3 flex-row flex-wrap gap-2">
+        <ExternalLink label="Webmotors" onPress={() => open(webmotors)} />
+        <ExternalLink label="OLX" onPress={() => open(olx)} />
+        <ExternalLink label="Mercado Livre" onPress={() => open(ml)} />
+      </View>
+    </View>
+  );
+}
+
+function ExternalLink({ label, onPress }: { label: string; onPress: () => void }) {
+  return (
+    <Pressable
+      onPress={onPress}
+      className="flex-row items-center rounded-full border border-gray-200 px-3 py-2 active:bg-gray-50"
+    >
+      <Text className="text-sm font-medium text-gray-800">{label}</Text>
+      <Ionicons name="open-outline" size={14} color="#4b5563" style={{ marginLeft: 6 }} />
+    </Pressable>
+  );
+}
+
+function slug(s: string): string {
+  return s
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
 }
 
 interface TcoRow {
