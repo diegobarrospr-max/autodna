@@ -35,8 +35,16 @@ const PWA_TAGS = `
 
 let html = fs.readFileSync(HTML, 'utf8');
 
+// Force viewport-fit=cover so iOS Safari (especially standalone PWA) exposes
+// non-zero env(safe-area-inset-*) values for our safe-area-context.
+html = html.replace(
+  /<meta\s+name="viewport"[^>]*\/?>/i,
+  '<meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no, viewport-fit=cover" />',
+);
+
 if (html.includes('<link rel="manifest"')) {
-  console.log('[inject-pwa] PWA tags já presentes — skip');
+  console.log('[inject-pwa] PWA tags já presentes — skip injection (mas viewport pode ter sido atualizado)');
+  fs.writeFileSync(HTML, html);
   process.exit(0);
 }
 
