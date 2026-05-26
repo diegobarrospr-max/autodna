@@ -41,6 +41,8 @@ export interface ListingWithModelAndCosts {
   maintenance_yearly: number;
   ipva_yearly: number;
   depreciation_yearly: number;
+  is_estimated?: boolean;
+  data_source?: 'curated' | 'fipe_auto';
 }
 
 export interface QuizInput extends FinancingTerms {

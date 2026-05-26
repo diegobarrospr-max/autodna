@@ -113,6 +113,13 @@ function MatchCard({ rec, badge }: { rec: Recommendation; badge: string }) {
       <View className="flex-row items-center justify-between bg-brand-50 px-5 py-3">
         <Text className="text-lg">{badge}</Text>
         <View className="flex-row items-center">
+          {l.is_estimated ? (
+            <View className="mr-2 rounded-full bg-gray-100 px-3 py-1">
+              <Text className="text-xs font-semibold text-gray-600">
+                Estimativa
+              </Text>
+            </View>
+          ) : null}
           {rec.overBudget ? (
             <View className="mr-2 rounded-full bg-amber-100 px-3 py-1">
               <Text className="text-xs font-semibold text-amber-800">

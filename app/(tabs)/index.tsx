@@ -5,13 +5,19 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { useAuthStore } from '@/stores/authStore';
 import { useProfile } from '@/hooks/useProfile';
-import { useRecommendations } from '@/hooks/useRecommendations';
+import {
+  useCatalogStats,
+  useRecommendations,
+} from '@/hooks/useRecommendations';
 
 export default function HomeTab() {
   const router = useRouter();
   const user = useAuthStore((s) => s.user);
   const { data: profile } = useProfile();
   const { data: recs } = useRecommendations();
+  const { data: stats } = useCatalogStats();
+  const totalModels = stats?.total_models ?? 40;
+  const totalBrands = stats?.total_brands ?? 12;
 
   const firstName =
     (profile?.full_name ?? (user?.user_metadata?.full_name as string | undefined))
@@ -66,10 +72,10 @@ export default function HomeTab() {
           <View className="flex-1 rounded-2xl border border-gray-200 p-4">
             <Ionicons name="car-sport" size={22} color="#1f54f5" />
             <Text className="mt-3 text-sm font-semibold text-gray-900">
-              40 modelos
+              {totalModels.toLocaleString('pt-BR')} modelos
             </Text>
             <Text className="mt-1 text-xs text-gray-500">
-              Catálogo dos mais vendidos no Brasil
+              {totalBrands} marcas do mercado brasileiro
             </Text>
           </View>
           <View className="flex-1 rounded-2xl border border-gray-200 p-4">

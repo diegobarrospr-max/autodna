@@ -15,19 +15,17 @@ import type {
   Transmission,
 } from '@/types/database';
 
-interface ListingRow {
-  id: string;
-  model_id: string;
-  condition: ConditionType;
-  manufacture_year: number;
-  mileage_km: number | null;
-  asking_price: number;
-  city: string | null;
-  state: string | null;
-}
+const BODY_TYPE_FOR_HOUSEHOLD: Record<number, BodyType[]> = {
+  1: ['hatch', 'sedan', 'crossover', 'suv', 'pickup'],
+  2: ['hatch', 'sedan', 'crossover', 'suv', 'pickup'],
+  3: ['hatch', 'sedan', 'crossover', 'suv', 'minivan'],
+  4: ['sedan', 'crossover', 'suv', 'minivan'],
+  5: ['suv', 'minivan'],
+};
 
-interface ModelRow {
-  id: string;
+interface EligibleRow {
+  listing_id: string;
+  model_id: string;
   brand: string;
   model: string;
   version: string;
@@ -40,85 +38,78 @@ interface ModelRow {
   fuel_consumption_city: number | null;
   fuel_consumption_road: number | null;
   tags: string[];
-}
-
-interface CostRow {
-  car_id: string;
+  is_estimated: boolean;
+  data_source: 'curated' | 'fipe_auto';
+  condition: ConditionType;
+  manufacture_year: number;
+  mileage_km: number | null;
+  asking_price: number;
+  city: string | null;
+  state: string | null;
   insurance_yearly: number;
   maintenance_yearly: number;
   ipva_yearly: number;
   depreciation_yearly: number;
 }
 
-async function fetchListingsWithModels(): Promise<ListingWithModelAndCosts[]> {
-  const { data: listingsData, error: lErr } = await supabase
-    .from('car_listings')
-    .select(
-      'id, model_id, condition, manufacture_year, mileage_km, asking_price, city, state',
-    )
-    .eq('active', true);
-  if (lErr) throw lErr;
-  const listings = (listingsData ?? []) as ListingRow[];
-  if (!listings.length) return [];
+async function fetchEligibleListings(quiz: QuizInput): Promise<ListingWithModelAndCosts[]> {
+  const bodyAllow =
+    BODY_TYPE_FOR_HOUSEHOLD[Math.min(quiz.household_size, 5)] ??
+    BODY_TYPE_FOR_HOUSEHOLD[5];
 
-  const modelIds = Array.from(new Set(listings.map((l) => l.model_id)));
+  const params = {
+    p_condition: quiz.car_condition_preference,
+    p_max_mileage_km: quiz.max_mileage_km,
+    p_min_seats: quiz.household_size,
+    p_body_types: bodyAllow,
+    p_max_price: quiz.max_budget,
+    p_transmission: quiz.transmission_preference,
+    p_limit: 500,
+  };
 
-  const { data: modelsData, error: mErr } = await supabase
-    .from('car_models')
-    .select(
-      'id, brand, model, version, year, body_type, fuel, transmission, seats, trunk_liters, fuel_consumption_city, fuel_consumption_road, tags',
-    )
-    .in('id', modelIds);
-  if (mErr) throw mErr;
-  const models = (modelsData ?? []) as ModelRow[];
+  // eligible_listings é uma RPC SQL custom; o tipo Database não conhece
+  const { data, error } = await (supabase.rpc as never as (
+    fn: string,
+    p: typeof params,
+  ) => Promise<{ data: EligibleRow[] | null; error: Error | null }>)(
+    'eligible_listings',
+    params,
+  );
+  if (error) throw error;
+  const rows = data ?? [];
 
-  const { data: costsData, error: cErr } = await supabase
-    .from('car_costs')
-    .select(
-      'car_id, insurance_yearly, maintenance_yearly, ipva_yearly, depreciation_yearly',
-    )
-    .in('car_id', modelIds);
-  if (cErr) throw cErr;
-  const costs = (costsData ?? []) as CostRow[];
-
-  const modelById = new Map<string, ModelRow>();
-  for (const m of models) modelById.set(m.id, m);
-  const costsById = new Map<string, CostRow>();
-  for (const c of costs) costsById.set(c.car_id, c);
-
-  const out: ListingWithModelAndCosts[] = [];
-  for (const l of listings) {
-    const m = modelById.get(l.model_id);
-    const c = costsById.get(l.model_id);
-    if (!m || !c) continue;
-    out.push({
-      listing_id: l.id,
-      model_id: m.id,
-      brand: m.brand,
-      model: m.model,
-      version: m.version,
-      year: m.year,
-      body_type: m.body_type,
-      fuel: m.fuel,
-      transmission: m.transmission,
-      seats: m.seats,
-      trunk_liters: m.trunk_liters,
-      fuel_consumption_city: m.fuel_consumption_city,
-      fuel_consumption_road: m.fuel_consumption_road,
-      tags: m.tags,
-      condition: l.condition,
-      manufacture_year: l.manufacture_year,
-      mileage_km: l.mileage_km,
-      asking_price: Number(l.asking_price),
-      city: l.city,
-      state: l.state,
-      insurance_yearly: Number(c.insurance_yearly),
-      maintenance_yearly: Number(c.maintenance_yearly),
-      ipva_yearly: Number(c.ipva_yearly),
-      depreciation_yearly: Number(c.depreciation_yearly),
-    });
-  }
-  return out;
+  return rows.map((r) => ({
+    listing_id: r.listing_id,
+    model_id: r.model_id,
+    brand: r.brand,
+    model: r.model,
+    version: r.version,
+    year: r.year,
+    body_type: r.body_type,
+    fuel: r.fuel,
+    transmission: r.transmission,
+    seats: r.seats,
+    trunk_liters: r.trunk_liters,
+    fuel_consumption_city: r.fuel_consumption_city
+      ? Number(r.fuel_consumption_city)
+      : null,
+    fuel_consumption_road: r.fuel_consumption_road
+      ? Number(r.fuel_consumption_road)
+      : null,
+    tags: r.tags ?? [],
+    condition: r.condition,
+    manufacture_year: r.manufacture_year,
+    mileage_km: r.mileage_km,
+    asking_price: Number(r.asking_price),
+    city: r.city,
+    state: r.state,
+    insurance_yearly: Number(r.insurance_yearly),
+    maintenance_yearly: Number(r.maintenance_yearly),
+    ipva_yearly: Number(r.ipva_yearly),
+    depreciation_yearly: Number(r.depreciation_yearly),
+    is_estimated: r.is_estimated,
+    data_source: r.data_source,
+  }));
 }
 
 interface EdgeFunctionRec {
@@ -155,9 +146,7 @@ interface EdgeFunctionRec {
   reason: string;
 }
 
-async function tryEdgeFunction(
-  quiz: QuizInput,
-): Promise<Recommendation[] | null> {
+async function tryEdgeFunction(quiz: QuizInput): Promise<Recommendation[] | null> {
   try {
     const { data, error } = await supabase.functions.invoke<{
       recommendations: EdgeFunctionRec[];
@@ -199,14 +188,6 @@ async function tryEdgeFunction(
   }
 }
 
-export function useListings() {
-  return useQuery({
-    queryKey: ['listings'],
-    queryFn: fetchListingsWithModels,
-    staleTime: 1000 * 60 * 10,
-  });
-}
-
 export function useGenerateRecommendations() {
   const userId = useAuthStore((s) => s.user?.id);
   const queryClient = useQueryClient();
@@ -215,15 +196,12 @@ export function useGenerateRecommendations() {
     mutationFn: async (quiz: QuizInput): Promise<Recommendation[]> => {
       if (!userId) throw new Error('not signed in');
 
-      // 1) Try Claude-powered Edge Function first (preferred).
       const fromEdge = await tryEdgeFunction(quiz);
       if (fromEdge && fromEdge.length > 0) {
         return fromEdge;
       }
 
-      // 2) Fallback: rank locally (no AI). The ranker already builds TCO
-      // using the financing terms supplied in the quiz.
-      const listings = await fetchListingsWithModels();
+      const listings = await fetchEligibleListings(quiz);
       const recs = filterAndRankListings(listings, quiz, 3);
 
       const generatedAt = new Date().toISOString();
@@ -258,5 +236,35 @@ export function useRecommendations() {
     queryFn: async () => [],
     enabled: false,
     initialData: [],
+  });
+}
+
+export interface CatalogStats {
+  total_models: number;
+  curated_models: number;
+  auto_models: number;
+  with_price: number;
+  total_brands: number;
+}
+
+export function useCatalogStats() {
+  return useQuery<CatalogStats>({
+    queryKey: ['catalog-stats'],
+    staleTime: 1000 * 60 * 5,
+    queryFn: async () => {
+      const { data, error } = await (supabase.rpc as never as (
+        fn: string,
+      ) => Promise<{ data: CatalogStats[] | null; error: Error | null }>)(
+        'car_catalog_stats',
+      );
+      if (error) throw error;
+      return data?.[0] ?? {
+        total_models: 0,
+        curated_models: 0,
+        auto_models: 0,
+        with_price: 0,
+        total_brands: 0,
+      };
+    },
   });
 }
