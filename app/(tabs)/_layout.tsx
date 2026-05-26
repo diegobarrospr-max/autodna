@@ -1,71 +1,96 @@
 import { Tabs } from 'expo-router';
+import { Pressable, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 
-export default function TabsLayout() {
+const ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
+  index: 'home',
+  quiz: 'help-circle',
+  matches: 'car-sport',
+  profile: 'person',
+};
+
+const LABELS: Record<string, string> = {
+  index: 'Início',
+  quiz: 'Quiz',
+  matches: 'Matches',
+  profile: 'Perfil',
+};
+
+function CustomTabBar({ state, navigation }: BottomTabBarProps) {
   const insets = useSafeAreaInsets();
-  // iOS home indicator é ~34px. Mesmo se o inset chegue zero (Safari sem
-  // viewport-fit ou Android), reservamos margem mínima decente.
-  const bottomPad = Math.max(insets.bottom, 24);
+  // iOS home indicator é ~34px. Mantemos um mínimo decente para o caso de
+  // o inset reportar zero (Safari sem standalone, Android, web normal).
+  const bottomPad = Math.max(insets.bottom, 16);
 
   return (
-    <Tabs
-      screenOptions={{
-        headerShown: false,
-        tabBarActiveTintColor: '#1f54f5',
-        tabBarInactiveTintColor: '#9ca3af',
-        tabBarStyle: {
-          height: 64 + bottomPad,
-          paddingTop: 8,
-          paddingBottom: bottomPad,
-          borderTopColor: '#e5e7eb',
-        },
-        tabBarItemStyle: {
-          paddingVertical: 4,
-        },
-        tabBarLabelStyle: {
-          fontSize: 11,
-          fontWeight: '500',
-          marginTop: 2,
-        },
+    <View
+      style={{
+        flexDirection: 'row',
+        borderTopWidth: 1,
+        borderTopColor: '#e5e7eb',
+        backgroundColor: '#ffffff',
+        paddingTop: 8,
+        paddingBottom: bottomPad,
       }}
     >
-      <Tabs.Screen
-        name="index"
-        options={{
-          title: 'Início',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="home" size={size} color={color} />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="quiz"
-        options={{
-          title: 'Quiz',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="help-circle" size={size} color={color} />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="matches"
-        options={{
-          title: 'Matches',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="car-sport" size={size} color={color} />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="profile"
-        options={{
-          title: 'Perfil',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="person" size={size} color={color} />
-          ),
-        }}
-      />
+      {state.routes.map((route, index) => {
+        const isFocused = state.index === index;
+        const color = isFocused ? '#1f54f5' : '#9ca3af';
+        const iconName = ICONS[route.name] ?? 'ellipse';
+        const label = LABELS[route.name] ?? route.name;
+
+        const onPress = () => {
+          const event = navigation.emit({
+            type: 'tabPress',
+            target: route.key,
+            canPreventDefault: true,
+          });
+          if (!isFocused && !event.defaultPrevented) {
+            navigation.navigate(route.name as never);
+          }
+        };
+
+        return (
+          <Pressable
+            key={route.key}
+            onPress={onPress}
+            style={{
+              flex: 1,
+              alignItems: 'center',
+              justifyContent: 'center',
+              paddingVertical: 6,
+              gap: 4,
+            }}
+          >
+            <Ionicons name={iconName} size={24} color={color} />
+            <Text
+              style={{
+                fontSize: 11,
+                fontWeight: '500',
+                color,
+              }}
+            >
+              {label}
+            </Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
+export default function TabsLayout() {
+  return (
+    <Tabs
+      screenOptions={{ headerShown: false }}
+      tabBar={(props) => <CustomTabBar {...props} />}
+    >
+      <Tabs.Screen name="index" />
+      <Tabs.Screen name="quiz" />
+      <Tabs.Screen name="matches" />
+      <Tabs.Screen name="profile" />
     </Tabs>
   );
 }
