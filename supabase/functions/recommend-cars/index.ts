@@ -1,18 +1,19 @@
 // AutoDNA — recommend-cars Edge Function
-// Recebe respostas do quiz, filtra candidatos por regras, chama Claude
+// Recebe respostas do quiz, filtra candidatos por regras, chama Gemini
 // para escolher top 3 com explicação narrativa em PT-BR, persiste em
 // matches e devolve o ranking para o cliente.
 //
 // Deploy:
 //   supabase functions deploy recommend-cars --project-ref eaorpeaszqkahjlukncr
 // Secrets (pelo dashboard Supabase ou CLI):
-//   supabase secrets set ANTHROPIC_API_KEY=sk-ant-... --project-ref eaorpeaszqkahjlukncr
+//   supabase secrets set GEMINI_API_KEY=AIza... --project-ref eaorpeaszqkahjlukncr
+//
+// Gemini API key: criar em https://aistudio.google.com/apikey (grátis)
 
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 
-const ANTHROPIC_MODEL = 'claude-sonnet-4-6';
-const ANTHROPIC_VERSION = '2023-06-01';
-const MAX_CANDIDATES_TO_CLAUDE = 12;
+const GEMINI_MODEL = 'gemini-2.5-flash';
+const MAX_CANDIDATES_TO_AI = 12;
 const TOP_N = 3;
 
 const FUEL_PRICE = 6.0;
@@ -70,7 +71,7 @@ interface Candidate {
   };
 }
 
-interface ClaudeRecommendation {
+interface AiRecommendation {
   listing_id: string;
   score: number;
   reason: string;
@@ -138,8 +139,8 @@ Deno.serve(async (req) => {
 
   const supabaseUrl = Deno.env.get('SUPABASE_URL');
   const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
-  const anthropicKey = Deno.env.get('ANTHROPIC_API_KEY');
-  if (!supabaseUrl || !serviceKey || !anthropicKey) {
+  const geminiKey = Deno.env.get('GEMINI_API_KEY');
+  if (!supabaseUrl || !serviceKey || !geminiKey) {
     return new Response('Server misconfigured', { status: 500 });
   }
 
@@ -277,11 +278,11 @@ Deno.serve(async (req) => {
     });
   }
 
-  // Sort by lowest TCO and take top N candidates for Claude
+  // Sort by lowest TCO and take top N candidates for Gemini
   candidates.sort((a, b) => a.tco.total - b.tco.total);
-  const finalists = candidates.slice(0, MAX_CANDIDATES_TO_CLAUDE);
+  const finalists = candidates.slice(0, MAX_CANDIDATES_TO_AI);
 
-  // ----- call Claude -----
+  // ----- call Gemini -----
   const systemPrompt = `Você é o AutoDNA, um consultor brasileiro especialista em carros. Sua missão é ajudar uma pessoa a escolher o carro certo para o estilo de vida e o bolso dela.
 
 Você recebe o perfil do usuário e uma lista de carros que já passaram pelos filtros básicos (cabem no orçamento, número de assentos suficiente, tipo de carroceria compatível). Sua tarefa é escolher os 3 melhores e explicar PORQUÊ, em português brasileiro casual e direto.
@@ -292,14 +293,7 @@ Regras:
 - NÃO invente carros que não estão na lista.
 - NÃO ofereça mais de 3 carros.
 - Atribua um score de 0 a 100 que reflete o quanto o carro combina com a pessoa.
-- Retorne APENAS JSON, sem markdown.
-
-Formato exato da resposta:
-{
-  "recommendations": [
-    {"listing_id": "uuid-do-listing", "score": 0-100, "reason": "explicação em PT-BR"}
-  ]
-}`;
+- Use APENAS os listing_id que aparecem na lista de candidatos.`;
 
   const userPayload = {
     perfil: {
@@ -329,46 +323,58 @@ Formato exato da resposta:
     })),
   };
 
-  const claudeRes = await fetch('https://api.anthropic.com/v1/messages', {
+  const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${geminiKey}`;
+  const geminiRes = await fetch(geminiUrl, {
     method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      'x-api-key': anthropicKey,
-      'anthropic-version': ANTHROPIC_VERSION,
-    },
+    headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
-      model: ANTHROPIC_MODEL,
-      max_tokens: 1500,
-      system: [
-        {
-          type: 'text',
-          text: systemPrompt,
-          cache_control: { type: 'ephemeral' },
-        },
-      ],
-      messages: [
+      systemInstruction: { parts: [{ text: systemPrompt }] },
+      contents: [
         {
           role: 'user',
-          content: JSON.stringify(userPayload),
+          parts: [{ text: JSON.stringify(userPayload) }],
         },
       ],
+      generationConfig: {
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: 'OBJECT',
+          properties: {
+            recommendations: {
+              type: 'ARRAY',
+              items: {
+                type: 'OBJECT',
+                properties: {
+                  listing_id: { type: 'STRING' },
+                  score: { type: 'INTEGER' },
+                  reason: { type: 'STRING' },
+                },
+                required: ['listing_id', 'score', 'reason'],
+              },
+            },
+          },
+          required: ['recommendations'],
+        },
+        temperature: 0.3,
+        maxOutputTokens: 1500,
+      },
     }),
   });
 
-  if (!claudeRes.ok) {
-    const text = await claudeRes.text();
-    return new Response(`Claude error: ${text}`, { status: 502 });
+  if (!geminiRes.ok) {
+    const text = await geminiRes.text();
+    return new Response(`Gemini error: ${text}`, { status: 502 });
   }
 
-  const claudeJson = (await claudeRes.json()) as {
-    content: Array<{ type: string; text?: string }>;
+  const geminiJson = (await geminiRes.json()) as {
+    candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
   };
-  const textBlock = claudeJson.content?.find((b) => b.type === 'text')?.text ?? '';
-  let parsed: { recommendations: ClaudeRecommendation[] };
+  const textBlock = geminiJson.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+  let parsed: { recommendations: AiRecommendation[] };
   try {
     parsed = JSON.parse(textBlock);
   } catch {
-    return new Response(`Could not parse Claude output: ${textBlock}`, {
+    return new Response(`Could not parse Gemini output: ${textBlock}`, {
       status: 502,
     });
   }

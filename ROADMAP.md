@@ -12,7 +12,8 @@ Documento vivo das próximas features. Atualizado a cada decisão de produto.
 - Ranking top 3 client-side com filtros server-side via RPC `eligible_listings`
 - TCO mensal com taxa Bacen ao vivo + entrada/prazo/cash
 - 40 carros curated com preço FIPE real maio/2026
-- Edge Functions deployadas: `get-financing-rate`, `sync-fipe-price` (cron mensal), `fipe-bulk-import`, `fipe-bulk-catalog`, `fipe-search`, `fipe-investigate`, `fipe-autopilot`, `recommend-cars` (aguarda ANTHROPIC_API_KEY)
+- Edge Functions deployadas: `get-financing-rate`, `sync-fipe-price` (cron mensal), `fipe-bulk-import`, `fipe-search`, `fipe-investigate`, `fipe-autopilot`, `recommend-cars` (aguarda `GEMINI_API_KEY`)
+- **IA escolhida: Gemini Free Tier** (vs Claude) — zero custo, mas trade-off: Free Tier do Gemini usa inputs pra treinar modelos do Google. Pra MVP/validação aceitável; antes de produção pesada, migrar pra Gemini Pago (~US$ 0.30/1M tokens) que não treina.
 - PWA instalável iOS/Android (Add to Home Screen)
 
 **Em execução:**
@@ -46,7 +47,7 @@ Documento vivo das próximas features. Atualizado a cada decisão de produto.
    - Consumo (cidade/estrada)
    - Dimensões (porta-malas, assentos)
    - Equipamentos (se tivermos)
-   - Estado hoje: parser tem isso parcialmente (HP, dimensões = null) → enriquecer via Claude (Fase E)
+   - Estado hoje: parser tem isso parcialmente (HP, dimensões = null) → enriquecer via Gemini (Fase E)
 4. **Calculadora TCO interativa** (ver A.3)
 5. **Gráfico histórico de preço** (ver B)
 6. **Reviews de proprietários** (ver C)
@@ -149,10 +150,10 @@ create table car_reported_issues (
 - **Anti-spam**:
   - 1 review por user por car_model (constraint DB)
   - Texto mínimo 30 caracteres se preencher body
-  - Profanity filter (Claude classifica)
+  - Profanity filter (Gemini classifica)
 - **Pipeline**:
   1. User submete → `moderation_status='pending'`
-  2. Edge Function `moderate-review` (Claude) classifica:
+  2. Edge Function `moderate-review` (Gemini) classifica:
      - 'approved' → visível
      - 'flagged' → vai pra revisão humana
      - 'rejected' → user notificado
@@ -184,7 +185,7 @@ create table car_reported_issues (
 ### D.1 — Edge Function `detect-chronic-issues`
 - Roda em cron (diário/semanal)
 - Pra cada `car_model` com ≥10 reviews, agrupa `car_reported_issues`
-- Claude clusteriza problemas similares ("motor liga e morre" + "motor não pega" = mesma issue)
+- Gemini clusteriza problemas similares ("motor liga e morre" + "motor não pega" = mesma issue)
 - Output: `chronic_issues` table
 
 ### D.2 — Schema
@@ -231,7 +232,7 @@ create table chronic_issues (
 - Triggered:
   - Lazy (quando user abre página do modelo pela 1ª vez)
   - Batch (cron, top N modelos visualizados)
-- Claude faz web search → extrai specs estruturadas:
+- Gemini faz web search → extrai specs estruturadas:
   - Consumo (cidade/estrada)
   - HP, torque, 0-100km/h
   - Porta-malas (litros)
@@ -255,7 +256,7 @@ create table chronic_issues (
 |---|---------|--------|------------------|
 | 1 | Threshold de problema crônico | Fase D | 5+ reviews E 10%+ |
 | 2 | Backfill histórico de preço (12 meses) | Fase B | Top 200 modelos só |
-| 3 | Quem modera reviews? | Fase C | Claude auto + queue manual pra flagged |
+| 3 | Quem modera reviews? | Fase C | Gemini auto + queue manual pra flagged |
 | 4 | Verificação de propriedade do carro | Fase C | Self-declaration MVP, OCR CRLV depois |
 | 5 | Nome do reviewer aparece? | Fase C | Primeiro nome + inicial sobrenome ("Diego B.") |
 | 6 | Threshold rating pra penalty no ranking | Fase C.5 | <3.0 |
