@@ -47,8 +47,19 @@ async function fetchFromBacen(): Promise<RateResult> {
     throw new Error('Bacen returned empty payload');
   }
   const row = json[json.length - 1];
-  const annualPct = Number(row.valor);
-  if (!Number.isFinite(annualPct) || annualPct <= 0) {
+  // Bacen historicamente retornava "24.65" (% a.a. com ponto) mas em 2026
+  // mudou pra inteiro sem decimal ("1221" significando 12.21% a.a.). Cobrir
+  // os 2 formatos: se vier vírgula ou ponto, parse direto; se for inteiro
+  // grande, divide por 100 pra recuperar as 2 casas decimais implícitas.
+  const raw = String(row.valor).replace(',', '.');
+  let annualPct: number;
+  if (raw.includes('.')) {
+    annualPct = Number(raw);
+  } else {
+    const n = Number(raw);
+    annualPct = n > 100 ? n / 100 : n;
+  }
+  if (!Number.isFinite(annualPct) || annualPct <= 0 || annualPct > 200) {
     throw new Error(`Invalid Bacen value: ${row.valor}`);
   }
   const monthly = Math.pow(1 + annualPct / 100, 1 / 12) - 1;
