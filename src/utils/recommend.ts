@@ -16,6 +16,8 @@ import {
   type TcoBreakdown,
 } from './tco';
 
+const CURRENT_YEAR = 2026;
+
 export interface ListingWithModelAndCosts {
   listing_id: string;
   model_id: string;
@@ -192,6 +194,24 @@ function scoreListings(
     ) {
       baseScore += 6;
       reasons.push('Espaço sobra para a família');
+    }
+
+    // Quando o usuário quer "novo", preferir Zero KM / ano corrente.
+    // Penaliza ano-modelo antigo vendido como novo (sinal de fim de linha).
+    if (quiz.car_condition_preference === 'new' && l.condition === 'new') {
+      const isZeroKm = l.tags?.includes('zero-km');
+      const isCurrentOrNewer = l.year >= CURRENT_YEAR;
+      if (isZeroKm) {
+        baseScore += 10;
+        reasons.push('Zero km, último estoque de fábrica');
+      } else if (isCurrentOrNewer) {
+        baseScore += 6;
+        reasons.push(`Ano-modelo ${l.year} (atual)`);
+      } else {
+        // Ano-modelo passado vendido como novo (Kwid 2025 em 2026 etc.)
+        baseScore -= 4;
+        reasons.push(`Ano-modelo ${l.year} (último ano produzido)`);
+      }
     }
 
     if (!affordable) {

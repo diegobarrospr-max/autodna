@@ -104,15 +104,34 @@ export default function MatchesTab() {
   );
 }
 
+const CURRENT_YEAR = 2026;
+
 function MatchCard({ rec, badge }: { rec: Recommendation; badge: string }) {
   const l = rec.listing;
-  const conditionLabel = l.condition === 'new' ? 'Novo' : `Usado · ${l.mileage_km?.toLocaleString('pt-BR')} km`;
+  const isZeroKm = l.tags?.includes('zero-km');
+  const isCurrentYearNew = l.condition === 'new' && l.year >= CURRENT_YEAR;
+  const isOlderNew = l.condition === 'new' && l.year < CURRENT_YEAR && !isZeroKm;
+
+  const conditionLabel = isZeroKm
+    ? 'Zero km · Novo'
+    : isCurrentYearNew
+      ? `${l.year} · Novo`
+      : isOlderNew
+        ? `Modelo ${l.year} · Novo (último ano-modelo)`
+        : `${l.year} · Usado · ${l.mileage_km?.toLocaleString('pt-BR')} km`;
 
   return (
     <View className="mt-6 overflow-hidden rounded-2xl border border-gray-200 bg-white">
       <View className="flex-row items-center justify-between bg-brand-50 px-5 py-3">
         <Text className="text-lg">{badge}</Text>
         <View className="flex-row items-center">
+          {isZeroKm ? (
+            <View className="mr-2 rounded-full bg-green-100 px-3 py-1">
+              <Text className="text-xs font-semibold text-green-800">
+                Zero km
+              </Text>
+            </View>
+          ) : null}
           {l.is_estimated ? (
             <View className="mr-2 rounded-full bg-gray-100 px-3 py-1">
               <Text className="text-xs font-semibold text-gray-600">
@@ -143,7 +162,7 @@ function MatchCard({ rec, badge }: { rec: Recommendation; badge: string }) {
           {l.model} {l.version}
         </Text>
         <Text className="mt-1 text-sm text-gray-500">
-          {l.year} · {conditionLabel} · {l.transmission}
+          {conditionLabel} · {l.transmission}
         </Text>
 
         <View className="mt-4 flex-row justify-between rounded-xl bg-gray-50 px-4 py-3">
