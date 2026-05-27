@@ -4,7 +4,7 @@
 //
 // Versionar BUST_KEY quando quiser invalidar o cache de todos os usuários.
 
-const CACHE_NAME = 'autodna-v1';
+const CACHE_NAME = 'autodna-v2';
 const STATIC_PREFIXES = ['/_expo/static/', '/icons/', '/assets/'];
 
 self.addEventListener('install', (event) => {

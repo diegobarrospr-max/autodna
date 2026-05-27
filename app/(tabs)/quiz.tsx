@@ -218,7 +218,11 @@ export default function QuizTab() {
     (paymentMode !== 'financed' || (downPayment !== null && months !== null));
 
   const onSubmit = async () => {
-    // Debug: confirma que o onSubmit está sendo chamado
+    // Debug visível: confirma que onSubmit foi chamado. Removível depois.
+    Alert.alert(
+      'Debug onSubmit',
+      `canSubmit=${canSubmit}\npaymentMode=${paymentMode}\nrateStatus=${rateQuery.status}\nhasRate=${!!rateQuery.data}\nrateError=${rateQuery.error?.message ?? '-'}`,
+    );
     console.log('[quiz] onSubmit', {
       canSubmit,
       paymentMode,
