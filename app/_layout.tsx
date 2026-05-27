@@ -24,11 +24,12 @@ function AuthGate() {
     if (status === 'idle' || status === 'loading') return;
 
     const inAuthGroup = segments[0] === '(auth)';
-    const inTabsGroup = segments[0] === '(tabs)';
 
     if (status === 'unauthenticated' && !inAuthGroup) {
       router.replace('/(auth)/login');
-    } else if (status === 'authenticated' && !inTabsGroup) {
+    } else if (status === 'authenticated' && inAuthGroup) {
+      // Only bounce out of the auth screens after login. Any other route
+      // (tabs, /car/[id], future detail pages) is fine to stay on.
       router.replace('/(tabs)');
     }
   }, [status, segments, router]);
@@ -45,6 +46,7 @@ export default function RootLayout() {
           <Stack screenOptions={{ headerShown: false }}>
             <Stack.Screen name="(auth)" />
             <Stack.Screen name="(tabs)" />
+            <Stack.Screen name="car/[id]" />
           </Stack>
           <StatusBar style="auto" />
         </QueryClientProvider>

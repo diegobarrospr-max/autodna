@@ -6,6 +6,7 @@ import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 
 const ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
   index: 'home',
+  catalog: 'list',
   quiz: 'help-circle',
   matches: 'car-sport',
   profile: 'person',
@@ -13,6 +14,7 @@ const ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
 
 const LABELS: Record<string, string> = {
   index: 'Início',
+  catalog: 'Catálogo',
   quiz: 'Quiz',
   matches: 'Matches',
   profile: 'Perfil',
@@ -88,6 +90,7 @@ export default function TabsLayout() {
       tabBar={(props) => <CustomTabBar {...props} />}
     >
       <Tabs.Screen name="index" />
+      <Tabs.Screen name="catalog" />
       <Tabs.Screen name="quiz" />
       <Tabs.Screen name="matches" />
       <Tabs.Screen name="profile" />

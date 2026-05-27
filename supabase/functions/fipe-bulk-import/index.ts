@@ -128,10 +128,21 @@ function estimateCosts(price: number, body: BodyType, fuel: FuelType) {
 
 // ---------- HTTP ----------
 
-async function fetchJson<T>(url: string): Promise<T> {
-  const res = await fetch(url, { headers: { accept: 'application/json' } });
-  if (!res.ok) throw new Error(`${url} returned ${res.status}`);
-  return (await res.json()) as T;
+// Parallelum tem rate limit agressivo. Em vez de retry dentro da mesma call
+// (o que prolongaria o tempo da edge function), a gente devolve o 429 como
+// erro e o pending segue na fila — o próximo tick do cron tenta de novo.
+// Um único retry curto cobre 429 esporádico sem alongar a execução.
+async function fetchJson<T>(url: string, attempts = 2): Promise<T> {
+  for (let i = 0; i < attempts; i++) {
+    const res = await fetch(url, { headers: { accept: 'application/json' } });
+    if (res.ok) return (await res.json()) as T;
+    if (res.status === 429 && i < attempts - 1) {
+      await new Promise((r) => setTimeout(r, 1500));
+      continue;
+    }
+    throw new Error(`${url} returned ${res.status}`);
+  }
+  throw new Error(`${url} exhausted retries`);
 }
 
 // ---------- Main ----------
@@ -146,7 +157,10 @@ Deno.serve(async (req) => {
 
   let body: { batch?: number } = {};
   try { body = await req.json(); } catch {}
-  const BATCH = Math.min(Math.max(body.batch ?? 30, 1), 100);
+  // Default reduzido pra 20 — com 750ms entre cada call, um batch de 20
+  // dura ~15s e cabe num único tick do cron sem estourar timeout, e a
+  // pressão sobre a Parallelum fica em ~25 req/min, dentro do limite.
+  const BATCH = Math.min(Math.max(body.batch ?? 20, 1), 100);
 
   // ---------- Phase 1: brands ----------
   const { count: brandsCount } = await admin
@@ -171,7 +185,7 @@ Deno.serve(async (req) => {
     let imported = 0;
     for (const b of pendingBrands as Array<{ codigo: string; nome: string }>) {
       try {
-        await new Promise((r) => setTimeout(r, 250));
+        await new Promise((r) => setTimeout(r, 750));
         const resp = await fetchJson<FipeModelsResponse>(`${PARALLELUM}/marcas/${b.codigo}/modelos`);
         const rows = (resp.modelos ?? []).map((m) => ({
           brand_code: b.codigo,
@@ -207,7 +221,7 @@ Deno.serve(async (req) => {
     for (const m of pendingModels as Array<{ brand_code: string; codigo: string; nome: string }>) {
       try {
         // 250ms de espaçamento entre requests pra respeitar rate limit Parallelum
-        await new Promise((r) => setTimeout(r, 250));
+        await new Promise((r) => setTimeout(r, 750));
         const years = await fetchJson<FipeYear[]>(
           `${PARALLELUM}/marcas/${m.brand_code}/modelos/${m.codigo}/anos`,
         );
@@ -228,6 +242,14 @@ Deno.serve(async (req) => {
           const { error } = await admin.from('fipe_catalog_years').upsert(rows);
           if (error) throw error;
         }
+        // Marca como "tentado" mesmo quando o filtro >=2018 dropa todos os anos
+        // (carro antigo descontinuado). Sem isso, o mesmo modelo voltava como
+        // pendente pra sempre e a fila nunca avançava.
+        await admin
+          .from('fipe_catalog_models')
+          .update({ years_fetched_at: new Date().toISOString() })
+          .eq('brand_code', m.brand_code)
+          .eq('codigo', m.codigo);
         imported += rows.length;
       } catch (err) {
         failed++;
