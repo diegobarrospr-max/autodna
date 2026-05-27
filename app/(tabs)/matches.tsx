@@ -89,7 +89,13 @@ export default function MatchesTab() {
         </View>
 
         {recs.map((rec, idx) => (
-          <MatchCard key={rec.listing.listing_id} rec={rec} badge={RANK_BADGE[idx] ?? '⭐️'} />
+          <MatchCard
+            key={rec.listing.listing_id}
+            rec={rec}
+            badge={RANK_BADGE[idx] ?? '⭐️'}
+            city={profile?.city ?? null}
+            state={profile?.state ?? null}
+          />
         ))}
 
         <View className="mt-6">
@@ -106,7 +112,17 @@ export default function MatchesTab() {
 
 const CURRENT_YEAR = 2026;
 
-function MatchCard({ rec, badge }: { rec: Recommendation; badge: string }) {
+function MatchCard({
+  rec,
+  badge,
+  city,
+  state,
+}: {
+  rec: Recommendation;
+  badge: string;
+  city: string | null;
+  state: string | null;
+}) {
   const l = rec.listing;
   const isZeroKm = l.tags?.includes('zero-km');
   const isCurrentYearNew = l.condition === 'new' && l.year >= CURRENT_YEAR;
@@ -199,6 +215,8 @@ function MatchCard({ rec, badge }: { rec: Recommendation; badge: string }) {
           model={l.model}
           year={l.year}
           condition={l.condition}
+          city={city}
+          state={state}
         />
       </View>
     </View>
@@ -210,22 +228,39 @@ function SearchOnline({
   model,
   year,
   condition,
+  city,
+  state,
 }: {
   brand: string;
   model: string;
   year: number;
   condition: 'new' | 'used';
+  city: string | null;
+  state: string | null;
 }) {
   const open = (url: string) => Linking.openURL(url).catch(() => undefined);
   const q = encodeURIComponent(`${brand} ${model}`);
-  const webmotors = `https://www.webmotors.com.br/carros/estoque/${slug(brand)}/${slug(model)}?anoDe=${year}&anoAte=${year}`;
-  const olx = `https://www.olx.com.br/autos-e-pecas/carros-vans-e-utilitarios/${condition === 'used' ? 'usados' : 'novos'}/estado-sp?q=${q}&rs=${year}&re=${year}`;
-  const ml = `https://lista.mercadolivre.com.br/${slug(brand)}-${slug(model)}-${year}`;
+  const uf = state?.toLowerCase() ?? 'sp';
+  const cityParam = city ? encodeURIComponent(city) : '';
+
+  // Webmotors: aceita estadocidade=UF|Cidade
+  const wmLoc = city && state
+    ? `&estadocidade=${state}%7C${cityParam}`
+    : state ? `&estadocidade=${state}` : '';
+  const webmotors = `https://www.webmotors.com.br/carros/estoque/${slug(brand)}/${slug(model)}?anoDe=${year}&anoAte=${year}${wmLoc}`;
+
+  // OLX: usa path /estado-{uf}/{cidade-slug}
+  const olxLoc = city ? `/${slug(city)}` : '';
+  const olx = `https://www.olx.com.br/autos-e-pecas/carros-vans-e-utilitarios/${condition === 'used' ? 'usados' : 'novos'}/estado-${uf}${olxLoc}?q=${q}&rs=${year}&re=${year}`;
+
+  // Mercado Livre: filtro via state query (_state=TG-{estado}). Pra MVP só path
+  const ml = `https://lista.mercadolivre.com.br/${slug(brand)}-${slug(model)}-${year}${state ? `?_state=TG-${state}` : ''}`;
 
   return (
     <View className="mt-5 border-t border-gray-100 pt-4">
       <Text className="text-xs font-semibold uppercase tracking-wider text-gray-500">
         Ver anúncios deste modelo
+        {city && state ? ` em ${city}/${state}` : state ? ` em ${state}` : ''}
       </Text>
       <View className="mt-3 flex-row flex-wrap gap-2">
         <ExternalLink label="Webmotors" onPress={() => open(webmotors)} />

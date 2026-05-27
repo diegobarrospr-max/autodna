@@ -3,6 +3,7 @@ import {
   Alert,
   KeyboardAvoidingView,
   Platform,
+  Pressable,
   ScrollView,
   Text,
   TextInput,
@@ -11,12 +12,15 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 
+import { Ionicons } from '@expo/vector-icons';
+
 import { Button } from '@/components/Button';
 import { Pill } from '@/components/Pill';
 import { RadioGroup } from '@/components/RadioGroup';
 import { useProfile, useUpdateProfile } from '@/hooks/useProfile';
 import { useGenerateRecommendations } from '@/hooks/useRecommendations';
 import { useFinancingRate } from '@/hooks/useFinancingRate';
+import { detectLocation } from '@/utils/geolocation';
 import type {
   CarConditionPreference,
   ParkingType,
@@ -88,6 +92,36 @@ const DOWN_PAYMENT_OPTIONS = [
   { value: 50, label: '50% de entrada' },
 ];
 
+const UF_OPTIONS = [
+  { value: 'AC', label: 'AC - Acre' },
+  { value: 'AL', label: 'AL - Alagoas' },
+  { value: 'AP', label: 'AP - Amapá' },
+  { value: 'AM', label: 'AM - Amazonas' },
+  { value: 'BA', label: 'BA - Bahia' },
+  { value: 'CE', label: 'CE - Ceará' },
+  { value: 'DF', label: 'DF - Distrito Federal' },
+  { value: 'ES', label: 'ES - Espírito Santo' },
+  { value: 'GO', label: 'GO - Goiás' },
+  { value: 'MA', label: 'MA - Maranhão' },
+  { value: 'MT', label: 'MT - Mato Grosso' },
+  { value: 'MS', label: 'MS - Mato Grosso do Sul' },
+  { value: 'MG', label: 'MG - Minas Gerais' },
+  { value: 'PA', label: 'PA - Pará' },
+  { value: 'PB', label: 'PB - Paraíba' },
+  { value: 'PR', label: 'PR - Paraná' },
+  { value: 'PE', label: 'PE - Pernambuco' },
+  { value: 'PI', label: 'PI - Piauí' },
+  { value: 'RJ', label: 'RJ - Rio de Janeiro' },
+  { value: 'RN', label: 'RN - Rio Grande do Norte' },
+  { value: 'RS', label: 'RS - Rio Grande do Sul' },
+  { value: 'RO', label: 'RO - Rondônia' },
+  { value: 'RR', label: 'RR - Roraima' },
+  { value: 'SC', label: 'SC - Santa Catarina' },
+  { value: 'SP', label: 'SP - São Paulo' },
+  { value: 'SE', label: 'SE - Sergipe' },
+  { value: 'TO', label: 'TO - Tocantins' },
+];
+
 const FINANCING_MONTHS_OPTIONS = [
   { value: 24, label: '24 meses' },
   { value: 36, label: '36 meses' },
@@ -105,6 +139,8 @@ export default function QuizTab() {
 
   const [incomeText, setIncomeText] = useState('');
   const [budgetText, setBudgetText] = useState('');
+  const [city, setCity] = useState('');
+  const [stateUf, setStateUf] = useState<string | null>(null);
   const [household, setHousehold] = useState<number | null>(null);
   const [parking, setParking] = useState<ParkingType | null>(null);
   const [monthlyKm, setMonthlyKm] = useState<number | null>(null);
@@ -115,11 +151,30 @@ export default function QuizTab() {
   const [paymentMode, setPaymentMode] = useState<PaymentMode | null>(null);
   const [downPayment, setDownPayment] = useState<number | null>(null);
   const [months, setMonths] = useState<number | null>(null);
+  const [detectingLocation, setDetectingLocation] = useState(false);
+
+  const onDetectLocation = async () => {
+    setDetectingLocation(true);
+    try {
+      const loc = await detectLocation();
+      setCity(loc.city);
+      setStateUf(loc.state);
+    } catch (err) {
+      Alert.alert(
+        'Não consegui detectar',
+        (err as Error).message + '\n\nVocê pode digitar manualmente abaixo.',
+      );
+    } finally {
+      setDetectingLocation(false);
+    }
+  };
 
   useEffect(() => {
     if (!profile) return;
     if (profile.monthly_income) setIncomeText(String(Math.round(profile.monthly_income)));
     if (profile.max_budget) setBudgetText(String(Math.round(profile.max_budget)));
+    if (profile.city) setCity(profile.city);
+    if (profile.state) setStateUf(profile.state);
     if (profile.household_size) setHousehold(profile.household_size);
     if (profile.parking_type) setParking(profile.parking_type);
     if (profile.monthly_km) setMonthlyKm(profile.monthly_km);
@@ -150,6 +205,8 @@ export default function QuizTab() {
 
   const canSubmit =
     income > 0 &&
+    city.trim().length >= 2 &&
+    stateUf !== null &&
     household !== null &&
     parking !== null &&
     monthlyKm !== null &&
@@ -178,6 +235,8 @@ export default function QuizTab() {
       await updateProfile.mutateAsync({
         monthly_income: income,
         max_budget: budget > 0 ? budget : null,
+        city: city.trim(),
+        state: stateUf,
         household_size: household,
         parking_type: parking,
         monthly_km: monthlyKm,
@@ -257,6 +316,37 @@ export default function QuizTab() {
             hint="Opcional. Se ficar em branco, mostramos tudo dentro do seu TCO."
           >
             <MoneyInput value={budgetText} onChangeText={setBudgetText} placeholder="Sem limite" />
+          </Question>
+
+          <Question
+            number={next()}
+            title="Onde você está?"
+            hint="A gente usa pra mostrar anúncios na sua região."
+          >
+            <Pressable
+              onPress={onDetectLocation}
+              disabled={detectingLocation}
+              className="mb-3 flex-row items-center justify-center rounded-xl border border-brand-200 bg-brand-50 py-3 active:bg-brand-100 disabled:opacity-60"
+            >
+              <Ionicons name="location" size={18} color="#1f54f5" />
+              <Text className="ml-2 text-sm font-semibold text-brand-700">
+                {detectingLocation ? 'Detectando…' : 'Usar minha localização'}
+              </Text>
+            </Pressable>
+            <View className="mb-2 flex-row items-center rounded-xl border border-gray-200 bg-gray-50 px-4">
+              <TextInput
+                className="flex-1 py-3 text-base text-gray-900"
+                placeholder="Cidade (ex: São Paulo)"
+                autoCapitalize="words"
+                value={city}
+                onChangeText={setCity}
+              />
+            </View>
+            <RadioGroup
+              value={stateUf}
+              onChange={setStateUf}
+              options={UF_OPTIONS}
+            />
           </Question>
 
           <Question number={next()} title="Quantas pessoas vão usar o carro?">
