@@ -152,6 +152,10 @@ export default function QuizTab() {
   const [downPayment, setDownPayment] = useState<number | null>(null);
   const [months, setMonths] = useState<number | null>(null);
   const [detectingLocation, setDetectingLocation] = useState(false);
+  // Mensagem inline (NÃO depende do Alert do RN-web — em PWA iOS standalone
+  // o Alert.alert às vezes não dispara nada). Tudo que precisamos comunicar
+  // ao usuário vai aqui também.
+  const [inlineMessage, setInlineMessage] = useState<{ title: string; body: string; kind: 'info' | 'error' } | null>(null);
 
   const onDetectLocation = async () => {
     setDetectingLocation(true);
@@ -218,18 +222,10 @@ export default function QuizTab() {
     (paymentMode !== 'financed' || (downPayment !== null && months !== null));
 
   const onSubmit = async () => {
-    // Debug visível: confirma que onSubmit foi chamado. Removível depois.
-    Alert.alert(
-      'Debug onSubmit',
-      `canSubmit=${canSubmit}\npaymentMode=${paymentMode}\nrateStatus=${rateQuery.status}\nhasRate=${!!rateQuery.data}\nrateError=${rateQuery.error?.message ?? '-'}`,
-    );
-    console.log('[quiz] onSubmit', {
-      canSubmit,
-      paymentMode,
-      hasRate: !!rateQuery.data,
-      rateError: rateQuery.error?.message,
-      rateFetching: rateQuery.isFetching,
-      rateStatus: rateQuery.status,
+    setInlineMessage({
+      kind: 'info',
+      title: 'onSubmit disparou',
+      body: `canSubmit=${canSubmit} | paymentMode=${paymentMode} | rateStatus=${rateQuery.status} | hasRate=${!!rateQuery.data}`,
     });
 
     if (!canSubmit) {
@@ -247,33 +243,35 @@ export default function QuizTab() {
       if (condition === 'used' && maxMileage === null) missing.push('km máximo');
       if (paymentMode === 'financed' && downPayment === null) missing.push('entrada');
       if (paymentMode === 'financed' && months === null) missing.push('prazo');
-      Alert.alert(
-        'Falta pouco',
-        `Preenche: ${missing.join(', ')}.`,
-      );
+      setInlineMessage({
+        kind: 'error',
+        title: 'Falta pouco',
+        body: `Preenche: ${missing.join(', ')}.`,
+      });
       return;
     }
 
-    // Pra modo financiado: garante que temos a taxa. Se cache está null
-    // ou inválido, força refetch antes de bloquear.
     let monthlyInterest = 0;
     if (paymentMode === 'financed') {
       let rate = rateQuery.data;
       if (!rate) {
+        setInlineMessage({ kind: 'info', title: 'Buscando taxa do Bacen…', body: '' });
         const refetched = await rateQuery.refetch();
         rate = refetched.data;
       }
       if (!rate) {
-        Alert.alert(
-          'Taxa do Bacen indisponível',
-          `Detalhe técnico: ${rateQuery.error?.message ?? 'sem resposta'}`,
-        );
+        setInlineMessage({
+          kind: 'error',
+          title: 'Taxa do Bacen indisponível',
+          body: `Detalhe: ${rateQuery.error?.message ?? 'sem resposta'}`,
+        });
         return;
       }
       monthlyInterest = rate.monthly_rate;
     }
 
     try {
+      setInlineMessage({ kind: 'info', title: 'Gerando matches…', body: '' });
       await updateProfile.mutateAsync({
         monthly_income: income,
         max_budget: budget > 0 ? budget : null,
@@ -308,16 +306,21 @@ export default function QuizTab() {
       });
 
       if (recs.length === 0) {
-        Alert.alert(
-          'Nenhum match encontrado',
-          'Os filtros foram muito restritivos. Tenta aumentar o teto de orçamento, trocar a preferência de câmbio ou ampliar a condição (novo/usado).',
-        );
+        setInlineMessage({
+          kind: 'error',
+          title: 'Nenhum match encontrado',
+          body: 'Tenta aumentar o teto de orçamento, trocar o câmbio ou ampliar a condição (novo/usado).',
+        });
         return;
       }
 
       router.push('/(tabs)/matches');
     } catch (err) {
-      Alert.alert('Erro ao gerar matches', (err as Error).message);
+      setInlineMessage({
+        kind: 'error',
+        title: 'Erro ao gerar matches',
+        body: (err as Error).message,
+      });
     }
   };
 
@@ -337,7 +340,7 @@ export default function QuizTab() {
           keyboardShouldPersistTaps="handled"
         >
           <Text className="text-sm font-medium uppercase tracking-wider text-brand-600">
-            Quiz · build B7
+            Quiz · build C1
           </Text>
           <Text className="mt-2 text-3xl font-bold text-gray-900">
             Conta pra gente
@@ -473,13 +476,62 @@ export default function QuizTab() {
             </View>
           </Question>
 
-          <View className="mt-8">
-            <Button
-              label={submitting ? 'Encontrando matches…' : 'Ver meus matches'}
-              loading={submitting}
-              onPress={onSubmit}
-              disabled={!canSubmit}
-            />
+          {inlineMessage ? (
+            <View
+              className={`mt-6 rounded-xl border p-4 ${
+                inlineMessage.kind === 'error'
+                  ? 'border-amber-200 bg-amber-50'
+                  : 'border-brand-200 bg-brand-50'
+              }`}
+            >
+              <Text
+                className={`text-sm font-semibold ${
+                  inlineMessage.kind === 'error'
+                    ? 'text-amber-900'
+                    : 'text-brand-900'
+                }`}
+              >
+                {inlineMessage.title}
+              </Text>
+              {inlineMessage.body ? (
+                <Text
+                  className={`mt-1 text-sm ${
+                    inlineMessage.kind === 'error'
+                      ? 'text-amber-800'
+                      : 'text-brand-800'
+                  }`}
+                >
+                  {inlineMessage.body}
+                </Text>
+              ) : null}
+            </View>
+          ) : null}
+
+          <View className="mt-6">
+            <Pressable
+              onPress={() => {
+                setInlineMessage({ kind: 'info', title: 'onPress recebido', body: 'processando…' });
+                void onSubmit();
+              }}
+              accessibilityRole="button"
+              style={{
+                paddingVertical: 16,
+                borderRadius: 12,
+                backgroundColor: submitting ? '#94a3b8' : '#1f54f5',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+              {...({
+                onClick: () => {
+                  setInlineMessage({ kind: 'info', title: 'onClick recebido', body: 'processando…' });
+                  void onSubmit();
+                },
+              } as object)}
+            >
+              <Text style={{ color: 'white', fontSize: 16, fontWeight: '600' }}>
+                {submitting ? 'Encontrando matches…' : 'Ver meus matches'}
+              </Text>
+            </Pressable>
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
