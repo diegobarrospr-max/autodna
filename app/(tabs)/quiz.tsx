@@ -218,6 +218,16 @@ export default function QuizTab() {
     (paymentMode !== 'financed' || (downPayment !== null && months !== null));
 
   const onSubmit = async () => {
+    // Debug: confirma que o onSubmit está sendo chamado
+    console.log('[quiz] onSubmit', {
+      canSubmit,
+      paymentMode,
+      hasRate: !!rateQuery.data,
+      rateError: rateQuery.error?.message,
+      rateFetching: rateQuery.isFetching,
+      rateStatus: rateQuery.status,
+    });
+
     if (!canSubmit) {
       const missing: string[] = [];
       if (income <= 0) missing.push('renda');
@@ -240,14 +250,23 @@ export default function QuizTab() {
       return;
     }
 
-    if (paymentMode === 'financed' && !rateQuery.data) {
-      Alert.alert(
-        'Buscando a taxa do mercado',
-        rateQuery.isFetching
-          ? 'Aguarde alguns segundos e tente de novo.'
-          : `Falha ao consultar a taxa: ${rateQuery.error?.message ?? 'tente novamente'}`,
-      );
-      return;
+    // Pra modo financiado: garante que temos a taxa. Se cache está null
+    // ou inválido, força refetch antes de bloquear.
+    let monthlyInterest = 0;
+    if (paymentMode === 'financed') {
+      let rate = rateQuery.data;
+      if (!rate) {
+        const refetched = await rateQuery.refetch();
+        rate = refetched.data;
+      }
+      if (!rate) {
+        Alert.alert(
+          'Taxa do Bacen indisponível',
+          `Detalhe técnico: ${rateQuery.error?.message ?? 'sem resposta'}`,
+        );
+        return;
+      }
+      monthlyInterest = rate.monthly_rate;
     }
 
     try {
@@ -281,8 +300,7 @@ export default function QuizTab() {
         payment_mode: paymentMode ?? 'financed',
         down_payment_pct: paymentMode === 'financed' ? (downPayment ?? 0) : 0,
         financing_months: paymentMode === 'financed' ? (months ?? 60) : 60,
-        monthly_interest:
-          paymentMode === 'financed' ? rateQuery.data!.monthly_rate : 0,
+        monthly_interest: monthlyInterest,
       });
 
       if (recs.length === 0) {
