@@ -337,7 +337,7 @@ export default function QuizTab() {
           keyboardShouldPersistTaps="handled"
         >
           <Text className="text-sm font-medium uppercase tracking-wider text-brand-600">
-            Quiz
+            Quiz · build B7
           </Text>
           <Text className="mt-2 text-3xl font-bold text-gray-900">
             Conta pra gente
