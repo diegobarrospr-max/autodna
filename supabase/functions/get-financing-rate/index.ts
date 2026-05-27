@@ -4,7 +4,7 @@
 // para reduzir hits e custo de cold-start.
 //
 // API:
-//   GET /functions/v1/get-financing-rate
+//   POST /functions/v1/get-financing-rate
 // Response:
 //   { annual_rate: number, monthly_rate: number, source: string, as_of: string }
 //
@@ -14,6 +14,17 @@ const BACEN_URL =
   'https://api.bcb.gov.br/dados/serie/bcdata.sgs.20712/dados/ultimos/1?formato=json';
 const SERIES_LABEL = 'BACEN SGS 20712 (CDC aquisição de veículos - PF)';
 const CACHE_TTL_MS = 12 * 60 * 60 * 1000; // 12h
+
+// CORS: sem esses headers o browser bloqueia a leitura da resposta no JS
+// mesmo quando o servidor retorna 200, e o supabase-js reporta como
+// "Failed to send a request to the Edge Function". OPTIONS é tratado abaixo.
+const CORS_HEADERS = {
+  'access-control-allow-origin': '*',
+  'access-control-allow-headers':
+    'authorization, x-client-info, apikey, content-type',
+  'access-control-allow-methods': 'POST, GET, OPTIONS',
+  'access-control-max-age': '86400',
+};
 
 interface BacenRow {
   data: string; // DD/MM/AAAA
@@ -72,11 +83,15 @@ async function fetchFromBacen(): Promise<RateResult> {
   };
 }
 
-Deno.serve(async (_req) => {
+Deno.serve(async (req) => {
+  if (req.method === 'OPTIONS') {
+    return new Response(null, { status: 204, headers: CORS_HEADERS });
+  }
   try {
     if (cached && cached.expiresAt > Date.now()) {
       return new Response(JSON.stringify(cached.data), {
         headers: {
+          ...CORS_HEADERS,
           'content-type': 'application/json',
           'cache-control': 'public, max-age=43200',
         },
@@ -87,6 +102,7 @@ Deno.serve(async (_req) => {
     cached = { data, expiresAt: Date.now() + CACHE_TTL_MS };
     return new Response(JSON.stringify(data), {
       headers: {
+        ...CORS_HEADERS,
         'content-type': 'application/json',
         'cache-control': 'public, max-age=43200',
       },
@@ -99,7 +115,7 @@ Deno.serve(async (_req) => {
       }),
       {
         status: 502,
-        headers: { 'content-type': 'application/json' },
+        headers: { ...CORS_HEADERS, 'content-type': 'application/json' },
       },
     );
   }

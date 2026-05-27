@@ -19,6 +19,31 @@ const TOP_N = 3;
 const FUEL_PRICE = 6.0;
 const AFFORDABLE_RATIO = 0.35;
 
+// CORS obrigatório pra invocar do browser via supabase-js (PWA/web).
+// Sem isso a fetch é abortada com TypeError → "Failed to send a request
+// to the Edge Function" mesmo com 200 OK no servidor.
+const CORS_HEADERS: Record<string, string> = {
+  'access-control-allow-origin': '*',
+  'access-control-allow-headers':
+    'authorization, x-client-info, apikey, content-type',
+  'access-control-allow-methods': 'POST, OPTIONS',
+  'access-control-max-age': '86400',
+};
+
+function jsonResponse(body: unknown, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { ...CORS_HEADERS, 'content-type': 'application/json' },
+  });
+}
+
+function textResponse(body: string, status: number) {
+  return new Response(body, {
+    status,
+    headers: { ...CORS_HEADERS, 'content-type': 'text/plain' },
+  });
+}
+
 type ConditionType = 'new' | 'used';
 type BodyType = 'hatch' | 'sedan' | 'suv' | 'pickup' | 'minivan' | 'crossover';
 type CarConditionPreference = 'new' | 'used' | 'both';
@@ -127,13 +152,16 @@ const BODY_FOR_HOUSEHOLD: Record<number, BodyType[]> = {
 // ---------- main ----------
 
 Deno.serve(async (req) => {
+  if (req.method === 'OPTIONS') {
+    return new Response(null, { status: 204, headers: CORS_HEADERS });
+  }
   if (req.method !== 'POST') {
-    return new Response('Method not allowed', { status: 405 });
+    return textResponse('Method not allowed', 405);
   }
 
   const authHeader = req.headers.get('authorization');
   if (!authHeader?.startsWith('Bearer ')) {
-    return new Response('Unauthorized', { status: 401 });
+    return textResponse('Unauthorized', 401);
   }
   const jwt = authHeader.slice(7);
 
@@ -141,7 +169,7 @@ Deno.serve(async (req) => {
   const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
   const geminiKey = Deno.env.get('GEMINI_API_KEY');
   if (!supabaseUrl || !serviceKey || !geminiKey) {
-    return new Response('Server misconfigured', { status: 500 });
+    return textResponse('Server misconfigured', 500);
   }
 
   const admin = createClient(supabaseUrl, serviceKey, {
@@ -150,7 +178,7 @@ Deno.serve(async (req) => {
 
   const { data: userData, error: userErr } = await admin.auth.getUser(jwt);
   if (userErr || !userData?.user) {
-    return new Response('Unauthorized', { status: 401 });
+    return textResponse('Unauthorized', 401);
   }
   const userId = userData.user.id;
 
@@ -158,11 +186,11 @@ Deno.serve(async (req) => {
   try {
     body = await req.json();
   } catch {
-    return new Response('Invalid JSON', { status: 400 });
+    return textResponse('Invalid JSON', 400);
   }
   const quiz = body.quiz;
   if (!quiz || !quiz.monthly_income || !quiz.priorities) {
-    return new Response('Missing quiz answers', { status: 400 });
+    return textResponse('Missing quiz answers', 400);
   }
 
   // ----- fetch catalog -----
@@ -173,12 +201,10 @@ Deno.serve(async (req) => {
     )
     .eq('active', true);
   if (lErr) {
-    return new Response(`listings error: ${lErr.message}`, { status: 500 });
+    return textResponse(`listings error: ${lErr.message}`, 500);
   }
   if (!listings?.length) {
-    return new Response(JSON.stringify({ recommendations: [] }), {
-      headers: { 'content-type': 'application/json' },
-    });
+    return jsonResponse({ recommendations: [] });
   }
 
   const modelIds = Array.from(new Set(listings.map((l: any) => l.model_id)));
@@ -273,9 +299,7 @@ Deno.serve(async (req) => {
   }
 
   if (candidates.length === 0) {
-    return new Response(JSON.stringify({ recommendations: [] }), {
-      headers: { 'content-type': 'application/json' },
-    });
+    return jsonResponse({ recommendations: [] });
   }
 
   // Sort by lowest TCO and take top N candidates for Gemini
@@ -363,7 +387,7 @@ Regras:
 
   if (!geminiRes.ok) {
     const text = await geminiRes.text();
-    return new Response(`Gemini error: ${text}`, { status: 502 });
+    return textResponse(`Gemini error: ${text}`, 502);
   }
 
   const geminiJson = (await geminiRes.json()) as {
@@ -374,9 +398,7 @@ Regras:
   try {
     parsed = JSON.parse(textBlock);
   } catch {
-    return new Response(`Could not parse Gemini output: ${textBlock}`, {
-      status: 502,
-    });
+    return textResponse(`Could not parse Gemini output: ${textBlock}`, 502);
   }
 
   const top = parsed.recommendations.slice(0, TOP_N);
@@ -408,7 +430,5 @@ Regras:
     );
   }
 
-  return new Response(JSON.stringify({ recommendations: enriched }), {
-    headers: { 'content-type': 'application/json' },
-  });
+  return jsonResponse({ recommendations: enriched });
 });
