@@ -219,14 +219,33 @@ export default function QuizTab() {
 
   const onSubmit = async () => {
     if (!canSubmit) {
-      Alert.alert('Falta pouco', 'Preenche todas as perguntas antes de continuar.');
+      const missing: string[] = [];
+      if (income <= 0) missing.push('renda');
+      if (city.trim().length < 2) missing.push('cidade');
+      if (!stateUf) missing.push('estado (UF)');
+      if (household === null) missing.push('quantas pessoas');
+      if (parking === null) missing.push('onde guarda');
+      if (monthlyKm === null) missing.push('quanto dirige');
+      if (condition === null) missing.push('novo/usado');
+      if (transmission === null) missing.push('câmbio');
+      if (paymentMode === null) missing.push('como pagar');
+      if (priorities.length === 0) missing.push('prioridades');
+      if (condition === 'used' && maxMileage === null) missing.push('km máximo');
+      if (paymentMode === 'financed' && downPayment === null) missing.push('entrada');
+      if (paymentMode === 'financed' && months === null) missing.push('prazo');
+      Alert.alert(
+        'Falta pouco',
+        `Preenche: ${missing.join(', ')}.`,
+      );
       return;
     }
 
     if (paymentMode === 'financed' && !rateQuery.data) {
       Alert.alert(
         'Buscando a taxa do mercado',
-        'Estamos consultando a taxa atual do Banco Central. Tenta de novo em alguns segundos.',
+        rateQuery.isFetching
+          ? 'Aguarde alguns segundos e tente de novo.'
+          : `Falha ao consultar a taxa: ${rateQuery.error?.message ?? 'tente novamente'}`,
       );
       return;
     }
