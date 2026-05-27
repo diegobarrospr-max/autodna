@@ -171,6 +171,7 @@ Deno.serve(async (req) => {
     let imported = 0;
     for (const b of pendingBrands as Array<{ codigo: string; nome: string }>) {
       try {
+        await new Promise((r) => setTimeout(r, 250));
         const resp = await fetchJson<FipeModelsResponse>(`${PARALLELUM}/marcas/${b.codigo}/modelos`);
         const rows = (resp.modelos ?? []).map((m) => ({
           brand_code: b.codigo,
@@ -201,8 +202,12 @@ Deno.serve(async (req) => {
 
   if (pendingModels && pendingModels.length > 0) {
     let imported = 0;
+    let failed = 0;
+    const errors: string[] = [];
     for (const m of pendingModels as Array<{ brand_code: string; codigo: string; nome: string }>) {
       try {
+        // 250ms de espaçamento entre requests pra respeitar rate limit Parallelum
+        await new Promise((r) => setTimeout(r, 250));
         const years = await fetchJson<FipeYear[]>(
           `${PARALLELUM}/marcas/${m.brand_code}/modelos/${m.codigo}/anos`,
         );
@@ -210,7 +215,7 @@ Deno.serve(async (req) => {
           .filter((y) => {
             const yr = Number(y.codigo.split('-')[0]);
             if (!Number.isFinite(yr)) return false;
-            if (yr === ZERO_KM_CODE) return true; // sempre aceita Zero KM
+            if (yr === ZERO_KM_CODE) return true;
             return yr >= MIN_YEAR && yr <= CURRENT_YEAR + 1;
           })
           .map((y) => ({
@@ -225,6 +230,8 @@ Deno.serve(async (req) => {
         }
         imported += rows.length;
       } catch (err) {
+        failed++;
+        if (errors.length < 3) errors.push(`${m.brand_code}/${m.codigo}: ${(err as Error).message}`);
         console.warn('model years failed', m.brand_code, m.codigo, (err as Error).message);
       }
     }
@@ -232,6 +239,8 @@ Deno.serve(async (req) => {
       phase: 'years',
       processed_models: pendingModels.length,
       imported_years: imported,
+      failed_models: failed,
+      sample_errors: errors,
       next_phase: 'years',
       done: false,
     });
