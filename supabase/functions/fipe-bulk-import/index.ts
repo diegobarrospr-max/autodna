@@ -17,6 +17,9 @@ import { createClient } from 'jsr:@supabase/supabase-js@2';
 
 const PARALLELUM = 'https://parallelum.com.br/fipe/api/v1/carros';
 const MIN_YEAR = 2018;
+const CURRENT_YEAR = 2026;
+const ZERO_KM_CODE = 32000; // a FIPE usa 32000 como "Zero KM"
+const AVG_KM_PER_YEAR = 12000;
 
 type BodyType = 'hatch' | 'sedan' | 'suv' | 'pickup' | 'minivan' | 'crossover';
 type FuelType = 'flex' | 'gasolina' | 'diesel' | 'hibrido' | 'eletrico';
@@ -206,7 +209,9 @@ Deno.serve(async (req) => {
         const rows = years
           .filter((y) => {
             const yr = Number(y.codigo.split('-')[0]);
-            return Number.isFinite(yr) && yr >= MIN_YEAR && yr <= 2030;
+            if (!Number.isFinite(yr)) return false;
+            if (yr === ZERO_KM_CODE) return true; // sempre aceita Zero KM
+            return yr >= MIN_YEAR && yr <= CURRENT_YEAR + 1;
           })
           .map((y) => ({
             brand_code: m.brand_code,
@@ -247,17 +252,29 @@ Deno.serve(async (req) => {
     year_name: string; brand_name: string; model_name: string;
   }>) {
     try {
-      const yearNum = Number(y.year_code.split('-')[0]);
+      const rawYear = Number(y.year_code.split('-')[0]);
+      const isZeroKm = rawYear === ZERO_KM_CODE;
+      // Pra Zero KM, year do car_model é o ano corrente (carro de fábrica hoje)
+      const yearNum = isZeroKm ? CURRENT_YEAR : rawYear;
       const fuel = parseFuelFromYearCode(y.year_code, y.model_name);
       const body = parseBodyType(y.brand_name, y.model_name);
       const transmission = parseTransmission(y.model_name);
       const displacement = parseDisplacement(y.model_name);
       const seats = parseSeats(y.model_name, body);
       const tags = parseTags(y.brand_name, y.model_name, body, fuel);
+      if (isZeroKm) tags.push('zero-km');
+
+      // Determina se é novo ou usado pelo ano efetivo
+      const isNew = isZeroKm || yearNum >= CURRENT_YEAR;
+      const condition: 'new' | 'used' = isNew ? 'new' : 'used';
+      const ageYears = Math.max(0, CURRENT_YEAR - yearNum);
+      const estimatedMileage = isNew ? null : ageYears * AVG_KM_PER_YEAR;
 
       let version = y.model_name;
       const brandShort = y.brand_name.split(' ').pop() ?? y.brand_name;
       version = version.replace(new RegExp(`^${brandShort}\\s+`, 'i'), '').trim();
+      // Pra Zero KM, marca isso na version pra distinguir do ano corrente "envelhecido"
+      if (isZeroKm && !/zero/i.test(version)) version = `${version} · 0 km`;
       const modelLabel = y.model_name.split(' ')[0] || y.model_name;
 
       const { data: inserted, error: insErr } = await admin
@@ -304,9 +321,9 @@ Deno.serve(async (req) => {
 
       await admin.from('car_listings').insert({
         model_id: inserted.id,
-        condition: 'new',
+        condition,
         manufacture_year: yearNum,
-        mileage_km: null,
+        mileage_km: estimatedMileage,
         asking_price: 1,
         source: 'catalog',
         active: true,
