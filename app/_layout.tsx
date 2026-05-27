@@ -24,12 +24,18 @@ function AuthGate() {
     if (status === 'idle' || status === 'loading') return;
 
     const inAuthGroup = segments[0] === '(auth)';
+    const inTabsGroup = segments[0] === '(tabs)';
+    const inCarDetail = segments[0] === 'car';
 
     if (status === 'unauthenticated' && !inAuthGroup) {
       router.replace('/(auth)/login');
-    } else if (status === 'authenticated' && inAuthGroup) {
-      // Only bounce out of the auth screens after login. Any other route
-      // (tabs, /car/[id], future detail pages) is fine to stay on.
+    } else if (
+      status === 'authenticated' &&
+      !inTabsGroup &&
+      !inCarDetail
+    ) {
+      // Detail routes like /car/[id] stay; anything else (root spinner,
+      // (auth) after login) bounces to the tabs home.
       router.replace('/(tabs)');
     }
   }, [status, segments, router]);
